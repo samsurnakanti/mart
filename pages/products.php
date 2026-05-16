@@ -2,7 +2,7 @@
 $search = trim($_GET['q'] ?? '');
 $category = trim($_GET['category'] ?? '');
 $sort = $_GET['sort'] ?? 'new';
-$categories = db()->query('SELECT DISTINCT category FROM products WHERE is_active = 1 ORDER BY category')->fetchAll(PDO::FETCH_COLUMN);
+$categories = categories(true);
 
 $sql = 'SELECT * FROM products WHERE is_active = 1';
 $params = [];
@@ -29,7 +29,7 @@ $products = $stmt->fetchAll();
     <div>
         <span>VMCmarts Catalog</span>
         <h1>Browse all products</h1>
-        <p>View MRP, offers, tax-ready pricing, stock, descriptions and wallet discount points before buying.</p>
+        <p>View MRP, offers, tax-ready pricing, stock and product descriptions before buying.</p>
     </div>
 </section>
 
@@ -38,7 +38,7 @@ $products = $stmt->fetchAll();
         <h2>Filters</h2>
         <a class="<?= $category === '' ? 'active' : '' ?>" href="index.php?page=products">All Categories</a>
         <?php foreach ($categories as $cat): ?>
-            <a class="<?= $category === $cat ? 'active' : '' ?>" href="index.php?page=products&category=<?= urlencode($cat) ?>"><?= e($cat) ?></a>
+            <a class="<?= $category === $cat['name'] ? 'active' : '' ?>" href="index.php?page=products&category=<?= urlencode($cat['name']) ?>"><?= e($cat['name']) ?></a>
         <?php endforeach; ?>
     </aside>
     <div class="catalog-main">
@@ -50,7 +50,7 @@ $products = $stmt->fetchAll();
                 <option value="new" <?= $sort === 'new' ? 'selected' : '' ?>>Newest</option>
                 <option value="price_low" <?= $sort === 'price_low' ? 'selected' : '' ?>>Price: Low to High</option>
                 <option value="price_high" <?= $sort === 'price_high' ? 'selected' : '' ?>>Price: High to Low</option>
-                <option value="points" <?= $sort === 'points' ? 'selected' : '' ?>>Most Points</option>
+                <?php if ($category === 'Discount Cards'): ?><option value="points" <?= $sort === 'points' ? 'selected' : '' ?>>Highest Card Value</option><?php endif; ?>
             </select>
             <button class="primary-cta">Apply</button>
         </form>

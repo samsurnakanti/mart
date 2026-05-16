@@ -63,7 +63,7 @@ $admins = (int)db()->query("SELECT COUNT(*) FROM users WHERE role IN ('admin','s
                     <div class="field"><label>Phone</label><input name="phone" value="<?= e($editUser['phone'] ?? '') ?>"></div>
                     <div class="field"><label>Role</label><select name="role"><?php foreach (['user','admin','super_admin'] as $role): ?><option value="<?= e($role) ?>" <?= (($editUser['role'] ?? 'user') === $role) ? 'selected' : '' ?>><?= e($role) ?></option><?php endforeach; ?></select></div>
                     <div class="field"><label>Wallet Points</label><input type="number" name="wallet_points" value="<?= e($editUser['wallet_points'] ?? 0) ?>"></div>
-                    <div class="field"><label>Password for New User</label><input type="password" name="password"></div>
+                    <div class="field"><label><?= $editUser ? 'Set New Password' : 'Password for New User' ?></label><input type="password" name="password"></div>
                     <button class="pill-btn full"><?= $editUser ? 'Update User' : 'Create User' ?></button>
                 </form>
             </section><br>
@@ -87,6 +87,15 @@ $admins = (int)db()->query("SELECT COUNT(*) FROM users WHERE role IN ('admin','s
                     <div><span>Super Admin</span><b>Users, Roles, Wallet Control</b></div>
                     <div><span>Database</span><b>vmcmarts on MySQL <?= e(DB_PORT) ?></b></div>
                 </div>
+            </section><br>
+            <section class="panel">
+                <h2 class="section-title">Set Password</h2><br>
+                <form method="post" class="form-grid">
+                    <input type="hidden" name="action" value="change_own_password">
+                    <div class="field"><label>Current Password</label><input type="password" name="current_password" required></div>
+                    <div class="field"><label>New Password</label><input type="password" name="new_password" required></div>
+                    <button class="pill-btn full">Update Password</button>
+                </form>
             </section>
         <?php endif; ?>
     </section>

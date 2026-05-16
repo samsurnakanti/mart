@@ -59,7 +59,7 @@ try {
 
         if ($action === 'place_order') {
             $orderId = place_order($_POST);
-            flash('ok', "Order #$orderId placed. Wallet discount points updated.");
+            flash('ok', "Order #$orderId placed. Admin will review and confirm it.");
             redirect_to('profile');
         }
 
@@ -68,6 +68,20 @@ try {
             save_product($_POST, $_FILES);
             flash('ok', 'Product saved successfully.');
             redirect_to('admin');
+        }
+
+        if ($action === 'save_category') {
+            require_admin();
+            save_category($_POST, $_FILES);
+            flash('ok', 'Category saved successfully.');
+            redirect_to('admin&module=categories');
+        }
+
+        if ($action === 'save_slider') {
+            require_admin();
+            save_slider($_POST, $_FILES);
+            flash('ok', 'Slider saved successfully.');
+            redirect_to('admin&module=sliders');
         }
 
         if ($action === 'update_inventory') {
@@ -84,17 +98,31 @@ try {
             redirect_to('super_admin');
         }
 
+        if ($action === 'complete_order') {
+            require_admin();
+            complete_order((int)($_POST['order_id'] ?? 0), (int)($_POST['points_to_allot'] ?? 0));
+            flash('ok', 'Order completed.');
+            redirect_to('admin&module=orders');
+        }
+
         if ($action === 'update_order_status') {
             require_admin();
             update_order_status((int)($_POST['order_id'] ?? 0), $_POST['status'] ?? 'Placed');
             flash('ok', 'Order status updated.');
-            redirect_to('admin');
+            redirect_to('admin&module=orders');
         }
 
         if ($action === 'update_profile') {
             update_profile($_POST);
             flash('ok', 'Profile updated successfully.');
             redirect_to('profile&tab=edit');
+        }
+
+        if ($action === 'change_own_password') {
+            change_own_password($_POST);
+            flash('ok', 'Password updated successfully.');
+            $user = current_user();
+            redirect_to($user && $user['role'] === 'super_admin' ? 'super_admin&module=system' : 'admin&module=settings');
         }
     }
 
@@ -115,6 +143,20 @@ try {
         set_product_active((int)($_GET['id'] ?? 0), 0);
         flash('ok', 'Product disabled.');
         redirect_to('admin');
+    }
+
+    if ($action === 'delete_category') {
+        require_admin();
+        set_category_active((int)($_GET['id'] ?? 0), 0);
+        flash('ok', 'Category disabled.');
+        redirect_to('admin&module=categories');
+    }
+
+    if ($action === 'delete_slider') {
+        require_admin();
+        set_slider_active((int)($_GET['id'] ?? 0), 0);
+        flash('ok', 'Slider disabled.');
+        redirect_to('admin&module=sliders');
     }
 
     if ($action === 'delete_product_image') {

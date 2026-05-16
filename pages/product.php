@@ -7,7 +7,6 @@ if (!$product): ?>
     <section class="panel">Product not found. <a class="see-all-btn" href="index.php?page=products">Back to products</a></section>
 <?php else:
     $images = product_gallery_images($product);
-    $off = (float)$product['mrp'] > 0 ? max(0, round((((float)$product['mrp'] - (float)$product['selling_price']) / (float)$product['mrp']) * 100)) : 0;
     $relatedStmt = db()->prepare('SELECT * FROM products WHERE is_active = 1 AND category = ? AND id <> ? ORDER BY created_at DESC LIMIT 4');
     $relatedStmt->execute([$product['category'], $product['id']]);
     $related = $relatedStmt->fetchAll();
@@ -34,14 +33,14 @@ if (!$product): ?>
         <div class="rating-row"><span>4.6</span><b>Customer loved product</b><em><?= (int)$product['stock'] ?> in stock</em></div>
         <div class="detail-price">
             <strong><?= money($product['selling_price']) ?></strong>
-            <?php if ((float)$product['mrp'] > (float)$product['selling_price']): ?><span>MRP <?= money($product['mrp']) ?></span><?php endif; ?>
-            <?php if ($off > 0): ?><b><?= $off ?>% off</b><?php endif; ?>
         </div>
         <p class="tax-note">Inclusive flow supports <?= e($product['tax_percent']) ?>% tax calculation during checkout.</p>
-        <div class="points-box">
-            <b><?= (int)$product['discount_points'] ?> points</b>
-            <span><?= $product['product_type'] === 'discount_points' ? 'This discount card credits wallet points after purchase.' : 'Earn wallet discount points when you buy this product.' ?></span>
-        </div>
+        <?php if ($product['product_type'] === 'discount_points'): ?>
+            <div class="points-box">
+                <b><?= (int)$product['discount_points'] ?> points</b>
+                <span>This card becomes active after admin confirms the card order.</span>
+            </div>
+        <?php endif; ?>
         <form method="post" class="detail-actions">
             <input type="hidden" name="product_id" value="<?= (int)$product['id'] ?>">
             <input type="hidden" name="back" value="product">
@@ -59,7 +58,7 @@ if (!$product): ?>
 
 <section class="product-description panel">
     <h2>Description</h2>
-    <p><?= nl2br(e($product['description'] ?: 'A quality VMCmarts product with transparent MRP, selling price, tax and wallet reward points.')) ?></p>
+    <p><?= nl2br(e($product['description'] ?: 'A quality VMCmarts product with transparent MRP, selling price and tax.')) ?></p>
     <div class="spec-grid">
         <div><span>Category</span><b><?= e($product['category']) ?></b></div>
         <div><span>Product Type</span><b><?= e(str_replace('_', ' ', $product['product_type'])) ?></b></div>

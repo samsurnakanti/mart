@@ -7,12 +7,11 @@
             <div class="field full"><label>Password</label><input type="password" name="password" required></div>
             <button class="pill-btn full">Login</button>
         </form>
-        <p class="small" style="margin-top:12px">Super admin: 9999900001 / super123</p>
-        <p class="small">Admin: 9999900000 / admin123</p>
+        <p class="small" style="margin-top:12px">Don’t have an account? <a href="index.php?page=signup">Create account / Signup now</a></p>
     </section>
     <section class="wallet-card">
         <p>VMCmarts Discount Wallet</p>
         <strong>Points</strong>
-        <p>Users can buy discount card products and receive wallet points after checkout.</p>
+                    <p>Users can buy discount cards, then admin activates them after confirming the order.</p>
     </section>
 </div>

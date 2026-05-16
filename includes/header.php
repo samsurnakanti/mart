@@ -5,6 +5,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>VMCmarts - Fresh Groceries, Smart Savings</title>
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
 <link rel="stylesheet" href="assets/style.css">
 <script defer src="assets/app.js"></script>
 </head>
@@ -12,14 +13,19 @@
 <div class="announce-bar">
     <span>Service available only in Khammam</span>
     <span>Admin ships orders manually</span>
-    <span>Buy discount cards and earn wallet points</span>
+    <span>Buy discount cards before using card points</span>
 </div>
 <header class="mobile-store-header">
     <div class="mobile-topline">
         <a class="mobile-logo" href="index.php">VMC<span>marts</span></a>
         <div class="mobile-actions">
-            <a href="index.php?page=profile" aria-label="Wallet">Wallet</a>
-            <a href="index.php?page=cart" aria-label="Cart">Cart <b><?= cart_count() ?></b></a>
+            <?php if ($user): ?>
+                <a href="index.php?page=profile" aria-label="Wallet">Wallet</a>
+                <a href="index.php?page=cart" aria-label="Cart">Cart <b><?= cart_count() ?></b></a>
+            <?php else: ?>
+                <a href="index.php?page=login" aria-label="Login">Login</a>
+                <a href="index.php?page=signup" aria-label="Signup">Signup</a>
+            <?php endif; ?>
         </div>
     </div>
     <div class="mobile-location">
@@ -35,6 +41,7 @@
         <a href="index.php?page=products">Products</a>
         <a href="index.php?page=products&category=Discount+Cards">Discount Cards</a>
         <a href="index.php?page=cart">Cart</a>
+        <?php if (!$user): ?><a href="index.php?page=signup">Create Account</a><?php endif; ?>
         <?php if ($user && in_array($user['role'], ['admin', 'super_admin'], true)): ?><a href="index.php?page=admin">Admin</a><?php endif; ?>
     </div>
 </header>
@@ -60,14 +67,12 @@
         </div>
     </div>
 </nav>
-<?php
-$headerCategories = db()->query('SELECT DISTINCT category FROM products WHERE is_active = 1 ORDER BY category LIMIT 10')->fetchAll(PDO::FETCH_COLUMN);
-?>
+<?php $headerCategories = array_slice(categories(true), 0, 10); ?>
 <div class="category-rail">
     <div class="category-rail-inner">
         <a href="index.php?page=products" class="rail-link">All Products</a>
         <?php foreach ($headerCategories as $cat): ?>
-            <a href="index.php?page=products&category=<?= urlencode($cat) ?>" class="rail-link"><?= e($cat) ?></a>
+            <a href="index.php?page=products&category=<?= urlencode($cat['name']) ?>" class="rail-link"><?= e($cat['name']) ?></a>
         <?php endforeach; ?>
         <a href="index.php?page=profile" class="rail-link rail-wallet">My Wallet</a>
     </div>

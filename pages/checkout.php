@@ -15,14 +15,13 @@ if (!$rows): ?>
             <div class="field"><label>Phone</label><input name="shipping_phone" value="<?= e($user['phone']) ?>" required></div>
             <div class="field"><label>City</label><input name="shipping_city" value="Khammam" readonly></div>
             <div class="field full"><label>Khammam Delivery Address</label><textarea name="shipping_address" placeholder="House no, street, area, landmark, Khammam" required></textarea></div>
-            <div class="field full"><label>Use Wallet Discount Points</label><input type="number" name="points_used" min="0" max="<?= (int)$user['wallet_points'] ?>" value="0"></div>
             <button class="pill-btn full">Place Order</button>
         </form>
     </section>
     <section class="wallet-card">
         <p>Order Total</p>
         <strong><?= money($totals['total']) ?></strong>
-        <p>Subtotal: <?= money($totals['subtotal']) ?><br>Tax: <?= money($totals['tax']) ?><br>Wallet: <?= (int)$user['wallet_points'] ?> points<br>Will earn: <?= (int)$totals['points'] ?> points</p>
+        <p>Subtotal: <?= money($totals['subtotal']) ?><br>Tax: <?= money($totals['tax']) ?><br>Active card balance: <?= (int)$user['wallet_points'] ?> points</p>
     </section>
 </div>
 <?php endif; ?>

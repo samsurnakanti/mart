@@ -50,6 +50,31 @@ function migrate(PDO $pdo): void
     }
 
     $pdo->exec("
+        CREATE TABLE IF NOT EXISTS categories (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            name VARCHAR(80) NOT NULL UNIQUE,
+            image_path VARCHAR(255) DEFAULT NULL,
+            is_active TINYINT(1) NOT NULL DEFAULT 1,
+            sort_order INT NOT NULL DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    ");
+
+    $pdo->exec("
+        CREATE TABLE IF NOT EXISTS sliders (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            title VARCHAR(180) NOT NULL,
+            subtitle TEXT DEFAULT NULL,
+            button_text VARCHAR(80) DEFAULT NULL,
+            button_link VARCHAR(255) DEFAULT NULL,
+            image_path VARCHAR(255) NOT NULL,
+            is_active TINYINT(1) NOT NULL DEFAULT 1,
+            sort_order INT NOT NULL DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    ");
+
+    $pdo->exec("
         CREATE TABLE IF NOT EXISTS products (
             id INT AUTO_INCREMENT PRIMARY KEY,
             name VARCHAR(180) NOT NULL,
@@ -112,6 +137,23 @@ function migrate(PDO $pdo): void
     ");
 
     $pdo->exec("
+        CREATE TABLE IF NOT EXISTS user_cards (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            user_id INT NOT NULL,
+            source_order_id INT NOT NULL,
+            source_order_item_id INT NOT NULL UNIQUE,
+            card_name VARCHAR(180) NOT NULL,
+            total_points INT NOT NULL DEFAULT 0,
+            remaining_points INT NOT NULL DEFAULT 0,
+            status ENUM('active','exhausted') NOT NULL DEFAULT 'active',
+            activated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id),
+            FOREIGN KEY (source_order_id) REFERENCES orders(id),
+            FOREIGN KEY (source_order_item_id) REFERENCES order_items(id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    ");
+
+    $pdo->exec("
         CREATE TABLE IF NOT EXISTS wallet_transactions (
             id INT AUTO_INCREMENT PRIMARY KEY,
             user_id INT NOT NULL,
@@ -125,6 +167,8 @@ function migrate(PDO $pdo): void
     ");
 
     seed_defaults($pdo);
+    seed_categories($pdo);
+    seed_sliders($pdo);
     seed_catalog_products($pdo);
 }
 
@@ -207,5 +251,50 @@ function seed_catalog_products(PDO $pdo): void
         if (!$exists->fetch()) {
             $insert->execute($row);
         }
+    }
+}
+
+function seed_categories(PDO $pdo): void
+{
+    $defaults = [
+        ['Vegetables', 'assets/cat-vegetables.svg', 10],
+        ['Grocery', 'assets/cat-grocery.svg', 20],
+        ['Tea & Coffee', 'assets/cat-tea.svg', 30],
+        ['Dairy', 'assets/cat-dairy.svg', 40],
+        ['Home Care', 'assets/cat-home.svg', 50],
+        ['Discount Cards', 'assets/cat-card.svg', 60],
+    ];
+    $exists = $pdo->prepare('SELECT id FROM categories WHERE name = ? LIMIT 1');
+    $insert = $pdo->prepare('INSERT INTO categories (name,image_path,sort_order) VALUES (?,?,?)');
+    foreach ($defaults as $row) {
+        $exists->execute([$row[0]]);
+        if (!$exists->fetch()) {
+            $insert->execute($row);
+        }
+    }
+
+    $missing = $pdo->query("
+        SELECT DISTINCT p.category
+        FROM products p
+        LEFT JOIN categories c ON c.name = p.category
+        WHERE c.id IS NULL
+    ")->fetchAll(PDO::FETCH_COLUMN);
+    foreach ($missing as $name) {
+        $insert->execute([$name, null, 999]);
+    }
+}
+
+function seed_sliders(PDO $pdo): void
+{
+    $count = (int)$pdo->query('SELECT COUNT(*) FROM sliders')->fetchColumn();
+    if ($count > 0) {
+        return;
+    }
+    $insert = $pdo->prepare('INSERT INTO sliders (title,subtitle,button_text,button_link,image_path,sort_order) VALUES (?,?,?,?,?,?)');
+    foreach ([
+        ['Fresh groceries for every day', 'Shop quality daily essentials from VMCmarts.', 'Shop Products', 'index.php?page=products', 'assets/slider-fresh.svg', 10],
+        ['Discount cards for wallet savings', 'Buy a card first, then use approved points on later orders.', 'View Cards', 'index.php?page=products&category=Discount+Cards', 'assets/slider-wallet.svg', 20],
+    ] as $row) {
+        $insert->execute($row);
     }
 }

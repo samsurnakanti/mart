@@ -180,13 +180,11 @@ function cart_totals(array $rows): array
 {
     $subtotal = 0.0;
     $tax = 0.0;
-    $points = 0;
     foreach ($rows as $row) {
         $subtotal += (float)$row['line_subtotal'];
         $tax += (float)$row['line_tax'];
-        $points += (int)$row['discount_points'] * (int)$row['qty'];
     }
-    return ['subtotal' => $subtotal, 'tax' => $tax, 'total' => $subtotal + $tax, 'points' => $points];
+    return ['subtotal' => $subtotal, 'tax' => $tax, 'total' => $subtotal + $tax];
 }
 
 function place_order(array $data): int
@@ -210,10 +208,9 @@ function place_order(array $data): int
     }
 
     $totals = cart_totals($rows);
-    $pointsUsed = max(0, (int)($data['points_used'] ?? 0));
-    $pointsUsed = min($pointsUsed, (int)$user['wallet_points'], (int)floor($totals['total']));
-    $grand = max(0, $totals['total'] - $pointsUsed);
-    $pointsEarned = $totals['points'];
+    $pointsUsed = 0;
+    $grand = $totals['total'];
+    $pointsEarned = 0;
 
     $pdo = db();
     $pdo->beginTransaction();
@@ -239,16 +236,6 @@ function place_order(array $data): int
         $stock->execute([$row['qty'], $row['id']]);
     }
 
-    if ($pointsUsed > 0) {
-        $pdo->prepare('INSERT INTO wallet_transactions (user_id,order_id,points,type,note) VALUES (?,?,?,?,?)')
-            ->execute([$user['id'], $orderId, $pointsUsed, 'debit', 'Redeemed on order']);
-    }
-    if ($pointsEarned > 0) {
-        $pdo->prepare('INSERT INTO wallet_transactions (user_id,order_id,points,type,note) VALUES (?,?,?,?,?)')
-            ->execute([$user['id'], $orderId, $pointsEarned, 'credit', 'Earned from purchased products / discount cards']);
-    }
-
-    $pdo->prepare('UPDATE users SET wallet_points = wallet_points - ? + ? WHERE id = ?')->execute([$pointsUsed, $pointsEarned, $user['id']]);
     $pdo->commit();
     $_SESSION['cart'] = [];
     return $orderId;
@@ -281,6 +268,93 @@ function upload_image(array $file): ?string
     return $name;
 }
 
+function categories(bool $activeOnly = false): array
+{
+    $sql = 'SELECT * FROM categories' . ($activeOnly ? ' WHERE is_active = 1' : '') . ' ORDER BY sort_order, name';
+    return db()->query($sql)->fetchAll();
+}
+
+function sliders(bool $activeOnly = false): array
+{
+    $sql = 'SELECT * FROM sliders' . ($activeOnly ? ' WHERE is_active = 1' : '') . ' ORDER BY sort_order, id';
+    return db()->query($sql)->fetchAll();
+}
+
+function save_category(array $data, array $files): void
+{
+    $id = (int)($data['id'] ?? 0);
+    $name = trim($data['name'] ?? '');
+    if ($name === '') {
+        throw new RuntimeException('Category name is required.');
+    }
+    $image = upload_image($files['image'] ?? []);
+    $sortOrder = max(0, (int)($data['sort_order'] ?? 0));
+    $isActive = isset($data['is_active']) ? 1 : 0;
+
+    if ($id > 0) {
+        $old = db()->prepare('SELECT name FROM categories WHERE id = ?');
+        $old->execute([$id]);
+        $oldName = (string)($old->fetchColumn() ?: '');
+        if ($image) {
+            db()->prepare('UPDATE categories SET name=?, image_path=?, sort_order=?, is_active=? WHERE id=?')
+                ->execute([$name, $image, $sortOrder, $isActive, $id]);
+        } else {
+            db()->prepare('UPDATE categories SET name=?, sort_order=?, is_active=? WHERE id=?')
+                ->execute([$name, $sortOrder, $isActive, $id]);
+        }
+        if ($oldName !== '' && $oldName !== $name) {
+            db()->prepare('UPDATE products SET category = ? WHERE category = ?')->execute([$name, $oldName]);
+        }
+        return;
+    }
+
+    db()->prepare('INSERT INTO categories (name,image_path,sort_order,is_active) VALUES (?,?,?,?)')
+        ->execute([$name, $image, $sortOrder, $isActive]);
+}
+
+function set_category_active(int $id, int $active): void
+{
+    db()->prepare('UPDATE categories SET is_active = ? WHERE id = ?')->execute([$active, $id]);
+}
+
+function save_slider(array $data, array $files): void
+{
+    $id = (int)($data['id'] ?? 0);
+    $title = trim($data['title'] ?? '');
+    $image = upload_image($files['image'] ?? []);
+    if ($title === '') {
+        throw new RuntimeException('Slider title is required.');
+    }
+    if ($id <= 0 && !$image) {
+        throw new RuntimeException('Slider image is required.');
+    }
+    $values = [
+        $title,
+        trim($data['subtitle'] ?? ''),
+        trim($data['button_text'] ?? ''),
+        trim($data['button_link'] ?? ''),
+        max(0, (int)($data['sort_order'] ?? 0)),
+        isset($data['is_active']) ? 1 : 0,
+    ];
+    if ($id > 0) {
+        if ($image) {
+            db()->prepare('UPDATE sliders SET title=?,subtitle=?,button_text=?,button_link=?,sort_order=?,is_active=?,image_path=? WHERE id=?')
+                ->execute([...$values, $image, $id]);
+        } else {
+            db()->prepare('UPDATE sliders SET title=?,subtitle=?,button_text=?,button_link=?,sort_order=?,is_active=? WHERE id=?')
+                ->execute([...$values, $id]);
+        }
+        return;
+    }
+    db()->prepare('INSERT INTO sliders (title,subtitle,button_text,button_link,sort_order,is_active,image_path) VALUES (?,?,?,?,?,?,?)')
+        ->execute([...$values, $image]);
+}
+
+function set_slider_active(int $id, int $active): void
+{
+    db()->prepare('UPDATE sliders SET is_active = ? WHERE id = ?')->execute([$active, $id]);
+}
+
 function save_product(array $data, array $files): void
 {
     $id = (int)($data['id'] ?? 0);
@@ -299,6 +373,11 @@ function save_product(array $data, array $files): void
     ];
     if ($values[0] === '' || $values[1] === '' || $values[4] < 0) {
         throw new RuntimeException('Product name, category and selling price are required.');
+    }
+    $categoryCheck = db()->prepare('SELECT id FROM categories WHERE name = ? AND is_active = 1 LIMIT 1');
+    $categoryCheck->execute([$values[1]]);
+    if (!$categoryCheck->fetch()) {
+        throw new RuntimeException('Choose an active category.');
     }
 
     if ($id > 0) {
@@ -386,26 +465,157 @@ function save_user(array $data): void
             ->execute([trim($data['name'] ?? ''), strtolower(trim($data['email'] ?? '')), trim($data['phone'] ?? ''), password_hash($password, PASSWORD_DEFAULT), $role, $points]);
         return;
     }
+    $password = (string)($data['password'] ?? '');
+    if ($password !== '') {
+        if (strlen($password) < 6) {
+            throw new RuntimeException('Password must be at least 6 characters.');
+        }
+        db()->prepare('UPDATE users SET name=?, email=?, phone=?, role=?, wallet_points=?, password_hash=? WHERE id=?')
+            ->execute([trim($data['name'] ?? ''), strtolower(trim($data['email'] ?? '')), trim($data['phone'] ?? ''), $role, $points, password_hash($password, PASSWORD_DEFAULT), $id]);
+        return;
+    }
     db()->prepare('UPDATE users SET name=?, email=?, phone=?, role=?, wallet_points=? WHERE id=?')
         ->execute([trim($data['name'] ?? ''), strtolower(trim($data['email'] ?? '')), trim($data['phone'] ?? ''), $role, $points, $id]);
 }
 
+function change_own_password(array $data): void
+{
+    $user = require_login();
+    $current = (string)($data['current_password'] ?? '');
+    $new = (string)($data['new_password'] ?? '');
+    if (!password_verify($current, $user['password_hash'])) {
+        throw new RuntimeException('Current password is incorrect.');
+    }
+    if (strlen($new) < 6) {
+        throw new RuntimeException('New password must be at least 6 characters.');
+    }
+    db()->prepare('UPDATE users SET password_hash = ? WHERE id = ?')->execute([password_hash($new, PASSWORD_DEFAULT), $user['id']]);
+}
+
+function active_card_balance(int $userId): int
+{
+    $stmt = db()->prepare("SELECT COALESCE(SUM(remaining_points),0) FROM user_cards WHERE user_id = ? AND status = 'active'");
+    $stmt->execute([$userId]);
+    return (int)$stmt->fetchColumn();
+}
+
+function active_cards(int $userId): array
+{
+    $stmt = db()->prepare("SELECT * FROM user_cards WHERE user_id = ? AND status = 'active' ORDER BY activated_at, id");
+    $stmt->execute([$userId]);
+    return $stmt->fetchAll();
+}
+
+function card_totals(int $userId): array
+{
+    $stmt = db()->prepare("
+        SELECT
+            COALESCE(SUM(total_points),0) AS total_points,
+            COALESCE(SUM(total_points - remaining_points),0) AS used_points,
+            COALESCE(SUM(remaining_points),0) AS remaining_points
+        FROM user_cards
+        WHERE user_id = ?
+    ");
+    $stmt->execute([$userId]);
+    $row = $stmt->fetch() ?: [];
+    return [
+        'total_points' => (int)($row['total_points'] ?? 0),
+        'used_points' => (int)($row['used_points'] ?? 0),
+        'remaining_points' => (int)($row['remaining_points'] ?? 0),
+    ];
+}
+
+function sync_wallet_points(PDO $pdo, int $userId): void
+{
+    $stmt = $pdo->prepare("SELECT COALESCE(SUM(remaining_points),0) FROM user_cards WHERE user_id = ? AND status = 'active'");
+    $stmt->execute([$userId]);
+    $pdo->prepare('UPDATE users SET wallet_points = ? WHERE id = ?')->execute([(int)$stmt->fetchColumn(), $userId]);
+}
+
+function activate_cards_for_order(PDO $pdo, int $orderId, int $userId): void
+{
+    $stmt = $pdo->prepare("
+        SELECT oi.*
+        FROM order_items oi
+        LEFT JOIN user_cards uc ON uc.source_order_item_id = oi.id
+        WHERE oi.order_id = ? AND oi.product_type = 'discount_points' AND uc.id IS NULL
+    ");
+    $stmt->execute([$orderId]);
+    $items = $stmt->fetchAll();
+    $insert = $pdo->prepare('INSERT INTO user_cards (user_id,source_order_id,source_order_item_id,card_name,total_points,remaining_points) VALUES (?,?,?,?,?,?)');
+    foreach ($items as $item) {
+        $points = (int)$item['points_value'] * (int)$item['qty'];
+        $insert->execute([$userId, $orderId, $item['id'], $item['product_name'], $points, $points]);
+    }
+}
+
+function allocate_points_to_order(PDO $pdo, int $orderId, int $userId, int $points): void
+{
+    if ($points <= 0) {
+        return;
+    }
+
+    $balance = active_card_balance($userId);
+    if ($points > $balance) {
+        throw new RuntimeException('Not enough active card points for this order.');
+    }
+
+    $remaining = $points;
+    $cards = active_cards($userId);
+    $updateCard = $pdo->prepare("UPDATE user_cards SET remaining_points = ?, status = ? WHERE id = ?");
+    foreach ($cards as $card) {
+        if ($remaining <= 0) {
+            break;
+        }
+        $deduct = min($remaining, (int)$card['remaining_points']);
+        $left = (int)$card['remaining_points'] - $deduct;
+        $updateCard->execute([$left, $left === 0 ? 'exhausted' : 'active', $card['id']]);
+        $remaining -= $deduct;
+    }
+
+    $pdo->prepare('UPDATE orders SET points_used = ?, grand_total = GREATEST(0, subtotal + tax_total - ?) WHERE id = ?')
+        ->execute([$points, $points, $orderId]);
+    $pdo->prepare('INSERT INTO wallet_transactions (user_id,order_id,points,type,note) VALUES (?,?,?,?,?)')
+        ->execute([$userId, $orderId, $points, 'debit', 'Points allotted by admin']);
+    sync_wallet_points($pdo, $userId);
+}
+
+function complete_order(int $orderId, int $pointsToAllot): void
+{
+    require_admin();
+    $pdo = db();
+    $pdo->beginTransaction();
+    $stmt = $pdo->prepare('SELECT * FROM orders WHERE id = ? FOR UPDATE');
+    $stmt->execute([$orderId]);
+    $order = $stmt->fetch();
+    if (!$order) {
+        throw new RuntimeException('Order not found.');
+    }
+    if ($order['status'] !== 'Placed') {
+        throw new RuntimeException('Only placed orders can be completed.');
+    }
+
+    allocate_points_to_order($pdo, $orderId, (int)$order['user_id'], max(0, $pointsToAllot));
+    activate_cards_for_order($pdo, $orderId, (int)$order['user_id']);
+    sync_wallet_points($pdo, (int)$order['user_id']);
+    $pdo->prepare("UPDATE orders SET status = 'Completed' WHERE id = ?")->execute([$orderId]);
+    $pdo->commit();
+}
+
 function update_order_status(int $orderId, string $status): void
 {
-    $allowed = ['Placed', 'Packed', 'Shipped', 'Delivered', 'Cancelled'];
+    $allowed = ['Completed', 'Cancelled'];
     if (!in_array($status, $allowed, true)) {
-        $status = 'Placed';
+        throw new RuntimeException('Invalid order status.');
     }
     db()->prepare('UPDATE orders SET status = ? WHERE id = ?')->execute([$status, $orderId]);
 }
 
 function render_product_card(array $p): void
 {
-    $off = (float)$p['mrp'] > 0 ? max(0, round((((float)$p['mrp'] - (float)$p['selling_price']) / (float)$p['mrp']) * 100)) : 0;
     ?>
     <article class="prod-card">
         <a class="prod-img-wrap" href="index.php?page=product&id=<?= (int)$p['id'] ?>">
-            <?php if ($off > 0): ?><span class="prod-badge"><?= e($off) ?>% OFF</span><?php endif; ?>
             <?php if ($p['product_type'] === 'discount_points'): ?><span class="prod-badge orange">CARD</span><?php endif; ?>
             <?php if (product_image($p['image_path'])): ?>
                 <img class="real-img" src="<?= e($p['image_path']) ?>" alt="<?= e($p['name']) ?>">
@@ -419,9 +629,8 @@ function render_product_card(array $p): void
             <p class="prod-qty"><?= e($p['description'] ?: 'Tax ' . $p['tax_percent'] . '%') ?></p>
             <div class="price-row">
                 <span class="price-now"><?= money($p['selling_price']) ?></span>
-                <?php if ((float)$p['mrp'] > (float)$p['selling_price']): ?><span class="price-was"><?= money($p['mrp']) ?></span><?php endif; ?>
             </div>
-            <div class="points-line">Earn <?= (int)$p['discount_points'] ?> discount points</div>
+            <?php if ($p['product_type'] === 'discount_points'): ?><div class="points-line">Card value <?= (int)$p['discount_points'] ?> points</div><?php endif; ?>
             <form method="post" class="buy-actions">
                 <input type="hidden" name="product_id" value="<?= (int)$p['id'] ?>">
                 <input type="hidden" name="back" value="<?= e($_GET['page'] ?? '') ?>">
