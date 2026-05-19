@@ -32,6 +32,32 @@ document.addEventListener('DOMContentLoaded', () => {
       });
     });
   });
+
+  document.querySelectorAll('[data-redeem-box]').forEach((box) => {
+    const input = box.querySelector('[data-redeem-input]');
+    const useMax = box.querySelector('[data-use-max]');
+    const saving = box.querySelector('[data-redeem-saving]');
+    const total = box.querySelector('[data-redeem-total]');
+    const orderTotal = Number(box.dataset.orderTotal || 0);
+    const maxRedeem = Number(box.dataset.maxRedeem || 0);
+
+    const money = (value) => `Rs ${value.toFixed(2)}`;
+
+    function render() {
+      const raw = Number(input?.value || 0);
+      const redeemed = Math.max(0, Math.min(maxRedeem, raw));
+      if (input) input.value = String(redeemed);
+      if (saving) saving.textContent = money(redeemed);
+      if (total) total.textContent = money(Math.max(0, orderTotal - redeemed));
+    }
+
+    input?.addEventListener('input', render);
+    useMax?.addEventListener('click', () => {
+      if (input) input.value = String(maxRedeem);
+      render();
+    });
+    render();
+  });
 });
 
 function initClassSlider({ root, slideSelector, dotsSelector, interval }) {

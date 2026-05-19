@@ -30,7 +30,8 @@ $categories = categories();
 $sliders = sliders();
 $activeCategories = array_values(array_filter($categories, fn($c) => (int)$c['is_active'] === 1));
 $orders = db()->query("SELECT o.*, u.name, u.email,
-    (SELECT COALESCE(SUM(remaining_points),0) FROM user_cards uc WHERE uc.user_id = o.user_id AND uc.status = 'active') AS active_card_points
+    u.wallet_points AS wallet_balance,
+    (SELECT COALESCE(SUM(remaining_points),0) FROM user_cards uc WHERE uc.user_id = o.user_id AND uc.status = 'active') AS card_capacity_left
     FROM orders o JOIN users u ON u.id = o.user_id ORDER BY o.id DESC LIMIT 100")->fetchAll();
 $orderItemsByOrder = [];
 if ($orders) {
@@ -258,13 +259,17 @@ $topProducts = db()->query('SELECT product_name, SUM(qty) qty, SUM(unit_price * 
                                 </details>
                             </td>
                             <td><?= money($o['grand_total']) ?></td>
-                            <td>Used <?= (int)$o['points_used'] ?><br><span class="small">Active balance <?= (int)$o['active_card_points'] ?></span></td>
+                            <td>
+                                Reward earned <?= (int)$o['points_earned'] ?><br>
+                                Used <?= (int)$o['points_used'] ?><br>
+                                <span class="small">Wallet <?= (int)$o['wallet_balance'] ?> / Card capacity <?= (int)$o['card_capacity_left'] ?></span>
+                            </td>
                             <td>
                                 <?php if ($o['status'] === 'Placed'): ?>
                                     <form method="post">
                                         <input type="hidden" name="action" value="complete_order">
                                         <input type="hidden" name="order_id" value="<?= (int)$o['id'] ?>">
-                                        <input style="width:100px" type="number" min="0" max="<?= (int)$o['active_card_points'] ?>" name="points_to_allot" value="0">
+                                        <input style="width:100px" type="number" min="0" max="<?= max(0, (int)$o['card_capacity_left'] - (int)$o['wallet_balance']) ?>" name="points_to_allot" value="0" title="Reward points to add to customer wallet">
                                         <button class="see-all-btn">Complete Order</button>
                                     </form>
                                 <?php else: ?>

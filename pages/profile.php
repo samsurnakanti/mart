@@ -20,7 +20,7 @@ $cardTotals = card_totals((int)$user['id']);
     <div>
         <span>VMCmarts Account</span>
         <h1><?= e($user['name']) ?></h1>
-        <p><?= e($user['email']) ?> · <?= $cardTotals['remaining_points'] ?> remaining points</p>
+        <p><?= e($user['email']) ?> · <?= (int)$user['wallet_points'] ?> ready to redeem points</p>
     </div>
 </section>
 
@@ -39,9 +39,9 @@ $cardTotals = card_totals((int)$user['id']);
     <section class="account-content">
         <?php if ($tab === 'overview'): ?>
             <div class="grid-3">
-                <div class="stats">Total Card Points<b><?= $cardTotals['total_points'] ?></b></div>
-                <div class="stats">Used Points<b><?= $cardTotals['used_points'] ?></b></div>
-                <div class="stats">Remaining Points<b><?= $cardTotals['remaining_points'] ?></b></div>
+                <div class="stats">Ready to Redeem<b><?= (int)$user['wallet_points'] ?></b></div>
+                <div class="stats">Reward Points Earned<b><?= array_sum(array_map(fn($o) => (int)$o['points_earned'], $orderRows)) ?></b></div>
+                <div class="stats">Card Capacity Left<b><?= $cardTotals['remaining_points'] ?></b></div>
             </div><br>
             <div class="grid-2">
                 <div class="stats">Orders<b><?= count($orderRows) ?></b></div>
@@ -49,9 +49,9 @@ $cardTotals = card_totals((int)$user['id']);
             </div><br>
             <div class="grid-2">
                 <section class="wallet-card">
-                    <p>Discount Card Wallet</p>
-                    <strong><?= $cardTotals['remaining_points'] ?> pts</strong>
-                    <p>Total <?= $cardTotals['total_points'] ?> / Used <?= $cardTotals['used_points'] ?> / Remaining <?= $cardTotals['remaining_points'] ?></p>
+                    <p>Reward Wallet</p>
+                    <strong><?= (int)$user['wallet_points'] ?> pts</strong>
+                    <p>Earned reward points ready to redeem</p>
                 </section>
                 <section class="panel">
                     <h2 class="section-title">Account Details</h2><br>
@@ -79,8 +79,8 @@ $cardTotals = card_totals((int)$user['id']);
         <?php if ($tab === 'wallet'): ?>
             <section class="wallet-card">
                 <p>My Wallet</p>
-                <strong><?= $cardTotals['remaining_points'] ?> pts</strong>
-                <p>Total <?= $cardTotals['total_points'] ?> points · Used <?= $cardTotals['used_points'] ?> points · Remaining <?= $cardTotals['remaining_points'] ?> points</p>
+                <strong><?= (int)$user['wallet_points'] ?> pts</strong>
+                <p>Earned reward points ready to redeem. Active discount card capacity left: <?= $cardTotals['remaining_points'] ?> points.</p>
             </section><br>
             <section class="panel">
                 <h2 class="section-title">Wallet Transactions</h2><br>
@@ -96,7 +96,7 @@ $cardTotals = card_totals((int)$user['id']);
         <?php if ($tab === 'discount_card'): ?>
             <section class="panel">
                 <h2 class="section-title">VMC Discount Card</h2>
-                <p class="section-kicker">Discount cards must be purchased first. After admin confirms the card order, it appears below as an active card.</p><br>
+                <p class="section-kicker">Discount cards do not add wallet balance. They define the maximum reward points that can be held and redeemed.</p><br>
                 <h3>My Active Cards</h3><br>
                 <?php if ($activeCards): ?>
                     <table class="table">
@@ -118,9 +118,24 @@ $cardTotals = card_totals((int)$user['id']);
             <section class="panel">
                 <h2 class="section-title">My Orders</h2><br>
                 <table class="table">
-                    <tr><th>Order</th><th>Total</th><th>Card Points Used</th><th>Status</th><th>Date</th></tr>
+                    <tr><th>Order</th><th>Total</th><th>Reward Earned</th><th>Points Used</th><th>Status</th><th>Invoice</th><th>Date</th></tr>
                     <?php foreach ($orderRows as $o): ?>
-                        <tr><td>#<?= (int)$o['id'] ?></td><td><?= money($o['grand_total']) ?></td><td><?= (int)$o['points_used'] ?></td><td><?= e($o['status']) ?></td><td><?= e($o['created_at']) ?></td></tr>
+                        <tr>
+                            <td>#<?= (int)$o['id'] ?></td>
+                            <td><?= money($o['grand_total']) ?></td>
+                            <td><?= (int)$o['points_earned'] ?></td>
+                            <td><?= (int)$o['points_used'] ?></td>
+                            <td><?= e($o['status']) ?></td>
+                            <td>
+                                <?php if ($o['status'] === 'Completed'): ?>
+                                    <a class="see-all-btn" href="index.php?page=invoice&id=<?= (int)$o['id'] ?>">View</a>
+                                    <a class="see-all-btn" href="index.php?action=download_invoice&id=<?= (int)$o['id'] ?>">Download</a>
+                                <?php else: ?>
+                                    <span class="small">After approval</span>
+                                <?php endif; ?>
+                            </td>
+                            <td><?= e($o['created_at']) ?></td>
+                        </tr>
                     <?php endforeach; ?>
                 </table>
             </section>
@@ -131,7 +146,7 @@ $cardTotals = card_totals((int)$user['id']);
                 <h2 class="section-title">Terms & Conditions</h2>
                 <p>By using VMCmarts, customers agree to provide accurate account, delivery and contact information.</p>
                 <p>Product prices, MRP, tax, stock and offers can change based on admin updates. Orders are accepted subject to stock availability.</p>
-                <p>Card points are promotional discount value and are allotted to orders only by admin.</p>
+                <p>Reward points are added to the wallet after admin completes an order, up to the active discount card capacity. Customers may redeem only the reward points they have actually earned.</p>
                 <p>Discount card purchases become active only after admin order confirmation.</p>
             </section>
         <?php endif; ?>

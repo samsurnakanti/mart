@@ -34,7 +34,7 @@ if (!$product): ?>
         <div class="detail-price">
             <strong><?= money($product['selling_price']) ?></strong>
         </div>
-        <p class="tax-note">Inclusive flow supports <?= e($product['tax_percent']) ?>% tax calculation during checkout.</p>
+        <p class="tax-note">Selling price includes <?= e($product['tax_percent']) ?>% GST.</p>
         <?php if ($product['product_type'] === 'discount_points'): ?>
             <div class="points-box">
                 <b><?= (int)$product['discount_points'] ?> points</b>

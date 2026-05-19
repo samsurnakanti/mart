@@ -1207,6 +1207,80 @@ code { background: #eef2f6; padding: 2px 6px; border-radius: 6px; }
   padding: 24px;
 }
 .wallet-card strong { display: block; font-size: 42px; margin-top: 8px; }
+.redeem-card {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-card);
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+}
+.redeem-preview,
+.redeem-entry > div {
+  align-items: center;
+  display: flex;
+}
+.redeem-copy span {
+  color: var(--green);
+  display: block;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.redeem-copy h2 {
+  font-family: var(--font-display);
+  font-size: 20px;
+  margin: 3px 0 0;
+}
+.redeem-copy p {
+  color: var(--muted);
+  font-size: 13px;
+  margin: 5px 0 0;
+}
+.redeem-entry label {
+  display: block;
+  font-weight: 800;
+  margin-bottom: 7px;
+}
+.redeem-entry > div {
+  gap: 10px;
+}
+.redeem-entry input {
+  flex: 1;
+}
+.redeem-entry button {
+  background: rgba(18, 117, 72, .1);
+  border: 0;
+  border-radius: 12px;
+  color: var(--green);
+  cursor: pointer;
+  font-weight: 900;
+  padding: 0 16px;
+}
+.redeem-preview {
+  background: #f7f8f7;
+  border-radius: 12px;
+  color: var(--muted);
+  justify-content: space-between;
+  padding: 14px 16px;
+}
+.redeem-preview b {
+  color: var(--ink);
+  margin-left: 5px;
+}
+.redeem-note {
+  color: var(--muted);
+  font-size: 13px;
+  margin: -4px 0 0;
+}
+@media (max-width: 640px) {
+  .redeem-preview {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
 .category-card-grid {
   display: grid;
   gap: 14px;

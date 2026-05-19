@@ -13,7 +13,7 @@
 <div class="announce-bar">
     <span>Service available only in Khammam</span>
     <span>Admin ships orders manually</span>
-    <span>Buy discount cards before using card points</span>
+    <span>Redeem wallet points during checkout with an active discount card</span>
 </div>
 <header class="mobile-store-header">
     <div class="mobile-topline">

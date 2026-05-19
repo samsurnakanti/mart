@@ -10,7 +10,7 @@
         <form method="post">
             <input type="hidden" name="action" value="update_cart">
             <table class="table">
-                <tr><th>Product</th><th>Qty</th><th>MRP</th><th>Price</th><th>Tax</th><th>Total</th><th></th></tr>
+                <tr><th>Product</th><th>Qty</th><th>MRP</th><th>Price incl. GST</th><th>GST included</th><th>Total</th><th></th></tr>
                 <?php foreach ($rows as $row): ?>
                     <tr>
                         <td><?= e($row['name']) ?><br><span class="small"><?= e($row['product_type']) ?></span></td>
@@ -27,8 +27,8 @@
         </form>
         <br>
         <div class="grid-2">
-            <div class="stats">Subtotal<b><?= money($totals['subtotal']) ?></b></div>
-            <div class="stats">Tax<b><?= money($totals['tax']) ?></b></div>
+            <div class="stats">Taxable Value<b><?= money($totals['subtotal']) ?></b></div>
+            <div class="stats">GST Included<b><?= money($totals['tax']) ?></b></div>
         </div>
         <br><a class="pill-btn" href="index.php?page=checkout">Checkout</a>
     <?php endif; ?>

@@ -165,6 +165,14 @@ try {
         flash('ok', 'Product image removed.');
         redirect_to('admin&module=products&edit=' . (int)($_GET['product_id'] ?? 0));
     }
+
+    if ($action === 'download_invoice') {
+        $invoice = order_for_invoice((int)($_GET['id'] ?? 0));
+        header('Content-Type: text/html; charset=UTF-8');
+        header('Content-Disposition: attachment; filename="invoice-' . (int)$invoice['id'] . '.html"');
+        echo render_invoice_document($invoice);
+        exit;
+    }
 } catch (Throwable $ex) {
     if ($pdo->inTransaction()) {
         $pdo->rollBack();
@@ -174,9 +182,13 @@ try {
 }
 
 $page = $_GET['page'] ?? 'home';
-$allowed = ['home', 'products', 'product', 'login', 'signup', 'cart', 'checkout', 'profile', 'admin', 'super_admin'];
+$allowed = ['home', 'products', 'product', 'login', 'signup', 'cart', 'checkout', 'profile', 'invoice', 'admin', 'super_admin'];
 if (!in_array($page, $allowed, true)) {
     $page = 'home';
+}
+
+if ($page === 'invoice') {
+    include __DIR__ . '/pages/invoice.php';
 }
 
 include __DIR__ . '/includes/header.php';

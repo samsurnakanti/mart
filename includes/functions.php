@@ -41,6 +41,7 @@ function current_user(): ?array
     if (empty($_SESSION['user_id'])) {
         return null;
     }
+    sync_reward_wallet_points(db(), (int)$_SESSION['user_id']);
     $stmt = db()->prepare('SELECT * FROM users WHERE id = ?');
     $stmt->execute([$_SESSION['user_id']]);
     return $stmt->fetch() ?: null;
@@ -168,10 +169,11 @@ function cart_products(): array
     $rows = $stmt->fetchAll();
     foreach ($rows as &$row) {
         $row['qty'] = (int)$items[$row['id']];
-        $line = (float)$row['selling_price'] * (int)$row['qty'];
-        $row['line_subtotal'] = $line;
-        $row['line_tax'] = $line * ((float)$row['tax_percent'] / 100);
-        $row['line_total'] = $row['line_subtotal'] + $row['line_tax'];
+        $lineTotal = (float)$row['selling_price'] * (int)$row['qty'];
+        $taxRate = (float)$row['tax_percent'];
+        $row['line_tax'] = $taxRate > 0 ? $lineTotal * ($taxRate / (100 + $taxRate)) : 0.0;
+        $row['line_subtotal'] = $lineTotal - $row['line_tax'];
+        $row['line_total'] = $lineTotal;
     }
     return $rows;
 }
@@ -208,8 +210,14 @@ function place_order(array $data): int
     }
 
     $totals = cart_totals($rows);
-    $pointsUsed = 0;
-    $grand = $totals['total'];
+    $pointsUsed = max(0, (int)($data['points_to_use'] ?? 0));
+    $walletBalance = reward_wallet_balance((int)$user['id']);
+    $cardCapacity = active_card_balance((int)$user['id']);
+    $maxUsablePoints = min((int)floor($totals['total']), $walletBalance, $cardCapacity);
+    if ($pointsUsed > $maxUsablePoints) {
+        throw new RuntimeException('You cannot redeem more points than your wallet balance, active discount card balance, or order total.');
+    }
+    $grand = max(0, $totals['total'] - $pointsUsed);
     $pointsEarned = 0;
 
     $pdo = db();
@@ -236,6 +244,13 @@ function place_order(array $data): int
         $stock->execute([$row['qty'], $row['id']]);
     }
 
+    if ($pointsUsed > 0) {
+        $pdo->prepare('INSERT INTO wallet_transactions (user_id,order_id,points,type,note) VALUES (?,?,?,?,?)')
+            ->execute([$user['id'], $orderId, $pointsUsed, 'debit', 'Points redeemed at checkout']);
+        deduct_card_capacity($pdo, (int)$user['id'], $pointsUsed);
+    }
+
+    sync_reward_wallet_points($pdo, (int)$user['id']);
     $pdo->commit();
     $_SESSION['cart'] = [];
     return $orderId;
@@ -499,6 +514,20 @@ function active_card_balance(int $userId): int
     return (int)$stmt->fetchColumn();
 }
 
+function reward_wallet_balance(int $userId): int
+{
+    $stmt = db()->prepare('SELECT COALESCE(SUM(points_earned - points_used),0) FROM orders WHERE user_id = ?');
+    $stmt->execute([$userId]);
+    return max(0, (int)$stmt->fetchColumn());
+}
+
+function sync_reward_wallet_points(PDO $pdo, int $userId): void
+{
+    $stmt = $pdo->prepare('SELECT COALESCE(SUM(points_earned - points_used),0) FROM orders WHERE user_id = ?');
+    $stmt->execute([$userId]);
+    $pdo->prepare('UPDATE users SET wallet_points = ? WHERE id = ?')->execute([max(0, (int)$stmt->fetchColumn()), $userId]);
+}
+
 function active_cards(int $userId): array
 {
     $stmt = db()->prepare("SELECT * FROM user_cards WHERE user_id = ? AND status = 'active' ORDER BY activated_at, id");
@@ -525,13 +554,6 @@ function card_totals(int $userId): array
     ];
 }
 
-function sync_wallet_points(PDO $pdo, int $userId): void
-{
-    $stmt = $pdo->prepare("SELECT COALESCE(SUM(remaining_points),0) FROM user_cards WHERE user_id = ? AND status = 'active'");
-    $stmt->execute([$userId]);
-    $pdo->prepare('UPDATE users SET wallet_points = ? WHERE id = ?')->execute([(int)$stmt->fetchColumn(), $userId]);
-}
-
 function activate_cards_for_order(PDO $pdo, int $orderId, int $userId): void
 {
     $stmt = $pdo->prepare("
@@ -549,15 +571,10 @@ function activate_cards_for_order(PDO $pdo, int $orderId, int $userId): void
     }
 }
 
-function allocate_points_to_order(PDO $pdo, int $orderId, int $userId, int $points): void
+function deduct_card_capacity(PDO $pdo, int $userId, int $points): void
 {
     if ($points <= 0) {
         return;
-    }
-
-    $balance = active_card_balance($userId);
-    if ($points > $balance) {
-        throw new RuntimeException('Not enough active card points for this order.');
     }
 
     $remaining = $points;
@@ -572,12 +589,6 @@ function allocate_points_to_order(PDO $pdo, int $orderId, int $userId, int $poin
         $updateCard->execute([$left, $left === 0 ? 'exhausted' : 'active', $card['id']]);
         $remaining -= $deduct;
     }
-
-    $pdo->prepare('UPDATE orders SET points_used = ?, grand_total = GREATEST(0, subtotal + tax_total - ?) WHERE id = ?')
-        ->execute([$points, $points, $orderId]);
-    $pdo->prepare('INSERT INTO wallet_transactions (user_id,order_id,points,type,note) VALUES (?,?,?,?,?)')
-        ->execute([$userId, $orderId, $points, 'debit', 'Points allotted by admin']);
-    sync_wallet_points($pdo, $userId);
 }
 
 function complete_order(int $orderId, int $pointsToAllot): void
@@ -595,9 +606,21 @@ function complete_order(int $orderId, int $pointsToAllot): void
         throw new RuntimeException('Only placed orders can be completed.');
     }
 
-    allocate_points_to_order($pdo, $orderId, (int)$order['user_id'], max(0, $pointsToAllot));
+    $rewardPoints = max(0, $pointsToAllot);
+    $cardCapacityLeft = active_card_balance((int)$order['user_id']);
+    $walletBalance = reward_wallet_balance((int)$order['user_id']);
+    $rewardRoom = max(0, $cardCapacityLeft - $walletBalance);
+    if ($rewardPoints > $rewardRoom) {
+        throw new RuntimeException('Reward points cannot exceed unused active discount card capacity.');
+    }
+
+    $pdo->prepare('UPDATE orders SET points_earned = ? WHERE id = ?')->execute([$rewardPoints, $orderId]);
+    if ($rewardPoints > 0) {
+        $pdo->prepare('INSERT INTO wallet_transactions (user_id,order_id,points,type,note) VALUES (?,?,?,?,?)')
+            ->execute([$order['user_id'], $orderId, $rewardPoints, 'credit', 'Reward points granted by admin']);
+    }
     activate_cards_for_order($pdo, $orderId, (int)$order['user_id']);
-    sync_wallet_points($pdo, (int)$order['user_id']);
+    sync_reward_wallet_points($pdo, (int)$order['user_id']);
     $pdo->prepare("UPDATE orders SET status = 'Completed' WHERE id = ?")->execute([$orderId]);
     $pdo->commit();
 }
@@ -609,6 +632,97 @@ function update_order_status(int $orderId, string $status): void
         throw new RuntimeException('Invalid order status.');
     }
     db()->prepare('UPDATE orders SET status = ? WHERE id = ?')->execute([$status, $orderId]);
+}
+
+function order_for_invoice(int $orderId): array
+{
+    $user = require_login();
+    $stmt = db()->prepare('
+        SELECT o.*, u.name AS customer_name, u.email AS customer_email
+        FROM orders o
+        JOIN users u ON u.id = o.user_id
+        WHERE o.id = ?
+    ');
+    $stmt->execute([$orderId]);
+    $order = $stmt->fetch();
+    if (!$order) {
+        throw new RuntimeException('Invoice not found.');
+    }
+    if ((int)$order['user_id'] !== (int)$user['id'] && !in_array($user['role'], ['admin', 'super_admin'], true)) {
+        throw new RuntimeException('Invoice access denied.');
+    }
+    if ($order['status'] !== 'Completed') {
+        throw new RuntimeException('Invoice is available after admin completes the order.');
+    }
+    $items = db()->prepare('SELECT * FROM order_items WHERE order_id = ? ORDER BY id');
+    $items->execute([$orderId]);
+    $order['items'] = $items->fetchAll();
+    return $order;
+}
+
+function render_invoice_document(array $order): string
+{
+    ob_start();
+    ?>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Invoice #<?= (int)$order['id'] ?></title>
+<style>
+body{font-family:Arial,sans-serif;color:#17202a;margin:0;background:#f6f7f8}
+.invoice{max-width:820px;margin:28px auto;background:#fff;padding:28px;border-radius:16px}
+.head{display:flex;justify-content:space-between;gap:20px;border-bottom:1px solid #ddd;padding-bottom:18px}
+h1{margin:0 0 5px}.muted{color:#667085}.meta{text-align:right}
+table{width:100%;border-collapse:collapse;margin-top:22px}th,td{padding:12px;border-bottom:1px solid #eee;text-align:left}th{text-transform:uppercase;font-size:12px;color:#667085}
+.totals{margin-left:auto;margin-top:18px;width:280px}.totals div{display:flex;justify-content:space-between;padding:7px 0}.grand{font-size:20px;font-weight:bold;border-top:1px solid #ddd;margin-top:8px;padding-top:12px!important}
+.actions{max-width:820px;margin:0 auto 20px;text-align:right}.actions button{padding:10px 14px;border:0;border-radius:10px;background:#17202a;color:#fff;font-weight:bold}
+@media print{body{background:#fff}.actions{display:none}.invoice{box-shadow:none;margin:0;max-width:none;border-radius:0}}
+</style>
+</head>
+<body>
+<div class="actions"><button onclick="window.print()">Print Invoice</button></div>
+<main class="invoice">
+    <div class="head">
+        <div>
+            <h1>VMCmarts</h1>
+            <div class="muted">Tax Invoice</div>
+        </div>
+        <div class="meta">
+            <b>Invoice #<?= (int)$order['id'] ?></b><br>
+            <span class="muted"><?= e($order['created_at']) ?></span>
+        </div>
+    </div>
+    <p>
+        <b>Bill To:</b> <?= e($order['shipping_name']) ?><br>
+        <?= e($order['shipping_phone']) ?><br>
+        <?= e($order['shipping_address']) ?>
+    </p>
+    <table>
+        <tr><th>Item</th><th>Qty</th><th>GST incl. price</th><th>GST</th><th>Total</th></tr>
+        <?php foreach ($order['items'] as $item): ?>
+            <?php $lineTotal = (float)$item['unit_price'] * (int)$item['qty']; ?>
+            <tr>
+                <td><?= e($item['product_name']) ?></td>
+                <td><?= (int)$item['qty'] ?></td>
+                <td><?= money($item['unit_price']) ?></td>
+                <td><?= money($item['tax_amount']) ?></td>
+                <td><?= money($lineTotal) ?></td>
+            </tr>
+        <?php endforeach; ?>
+    </table>
+    <div class="totals">
+        <div><span>Taxable value</span><b><?= money($order['subtotal']) ?></b></div>
+        <div><span>GST included</span><b><?= money($order['tax_total']) ?></b></div>
+        <div><span>Points redeemed</span><b><?= (int)$order['points_used'] ?></b></div>
+        <div class="grand"><span>Grand total</span><b><?= money($order['grand_total']) ?></b></div>
+    </div>
+</main>
+</body>
+</html>
+    <?php
+    return (string)ob_get_clean();
 }
 
 function render_product_card(array $p): void
