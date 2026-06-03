@@ -58,6 +58,24 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     render();
   });
+
+  const distributorOpen = document.querySelector('[data-distributor-menu-open]');
+  const distributorCloseButtons = document.querySelectorAll('[data-distributor-menu-close]');
+  const closeDistributorMenu = () => document.body.classList.remove('distributor-menu-open');
+
+  distributorOpen?.addEventListener('click', () => {
+    document.body.classList.add('distributor-menu-open');
+  });
+
+  distributorCloseButtons.forEach((button) => {
+    button.addEventListener('click', closeDistributorMenu);
+  });
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      closeDistributorMenu();
+    }
+  });
 });
 
 function initClassSlider({ root, slideSelector, dotsSelector, interval }) {

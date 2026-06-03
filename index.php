@@ -129,13 +129,13 @@ try {
         if ($action === 'update_profile') {
             update_profile($_POST);
             flash('ok', 'Profile updated successfully.');
-            redirect_to('profile&tab=edit');
+            redirect_to($_POST['back'] ?? 'profile&tab=edit');
         }
 
         if ($action === 'update_distributor_kyc') {
             update_distributor_kyc($_POST, $_FILES);
             flash('ok', 'Distributor KYC submitted successfully.');
-            redirect_to('profile&tab=kyc');
+            redirect_to($_POST['back'] ?? 'profile&tab=kyc');
         }
 
         if ($action === 'change_own_password') {

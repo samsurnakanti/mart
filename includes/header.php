@@ -1,4 +1,7 @@
-<?php $user = current_user(); ?>
+<?php
+$user = current_user();
+$activePage = $_GET['page'] ?? 'home';
+?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -17,7 +20,14 @@
 </div>
 <header class="mobile-store-header">
     <div class="mobile-topline">
-        <a class="mobile-logo" href="index.php">VMC<span>marts</span></a>
+        <div class="mobile-brand-row">
+            <?php if ($user && $user['role'] === 'distributor' && $activePage === 'distributor'): ?>
+                <button class="mobile-menu-toggle" type="button" aria-label="Open distributor menu" data-distributor-menu-open>
+                    <span></span><span></span><span></span>
+                </button>
+            <?php endif; ?>
+            <a class="mobile-logo" href="index.php">VMC<span>marts</span></a>
+        </div>
         <div class="mobile-actions">
             <?php if ($user): ?>
                 <a href="index.php?page=profile" aria-label="Wallet">Wallet</a>
@@ -85,7 +95,6 @@
 <?php if ($messages = flashes()): ?>
 <div class="flash"><?php foreach ($messages as $m): ?><div class="<?= e($m['type']) ?>"><?= e($m['message']) ?></div><?php endforeach; ?></div>
 <?php endif; ?>
-<?php $activePage = $_GET['page'] ?? 'home'; ?>
 <nav class="mobile-bottom-nav" aria-label="Mobile navigation">
     <a class="<?= $activePage === 'home' ? 'active' : '' ?>" href="index.php"><i>Home</i><span>Home</span></a>
     <a class="<?= $activePage === 'products' || $activePage === 'product' ? 'active' : '' ?>" href="index.php?page=products"><i>Shop</i><span>Shop</span></a>
