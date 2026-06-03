@@ -1321,6 +1321,92 @@ code { background: #eef2f6; padding: 2px 6px; border-radius: 6px; }
   line-height: 1.15;
   margin-top: 7px;
 }
+.ref-box {
+  background: var(--green-soft);
+  border: 1px solid #ccebd6;
+  border-radius: var(--radius);
+  color: var(--green-d);
+  font-family: var(--font-display);
+  font-size: 24px;
+  font-weight: 900;
+  letter-spacing: 1px;
+  margin-bottom: 10px;
+  padding: 14px;
+  word-break: break-word;
+}
+.doc-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.distributor-hero {
+  background: linear-gradient(135deg, var(--green-d), var(--teal));
+}
+.letter-doc,
+.id-card-doc {
+  min-height: 280px;
+}
+.letter-doc span,
+.id-card-doc span {
+  color: var(--green);
+  display: block;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 1.2px;
+  margin-bottom: 12px;
+  text-transform: uppercase;
+}
+.letter-doc h2,
+.id-card-doc h2 {
+  font-family: var(--font-display);
+  font-size: 24px;
+  line-height: 1.18;
+  margin-bottom: 16px;
+}
+.id-card-doc {
+  background: linear-gradient(145deg, #fff, #eef8f4);
+  text-align: center;
+}
+.id-card-doc .account-avatar {
+  color: #fff;
+  margin: 8px auto 14px;
+}
+.genealogy-tree,
+.genealogy-tree ul {
+  list-style: none;
+  margin: 0;
+  padding-left: 18px;
+}
+.genealogy-tree {
+  padding-left: 0;
+}
+.genealogy-tree li {
+  border-left: 2px solid var(--line);
+  margin: 0 0 10px;
+  padding-left: 14px;
+}
+.tree-node {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  display: grid;
+  gap: 4px;
+  max-width: 360px;
+  padding: 12px;
+}
+.tree-node b {
+  font-size: 15px;
+}
+.tree-node span,
+.tree-node em {
+  color: var(--muted);
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 800;
+}
+.tree-node em {
+  color: var(--green);
+}
 
 .footer {
   background: var(--ink);

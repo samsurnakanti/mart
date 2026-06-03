@@ -2,6 +2,9 @@
 $user = require_login();
 $tab = $_GET['tab'] ?? 'overview';
 $allowedTabs = ['overview', 'edit', 'wallet', 'discount_card', 'orders', 'terms', 'privacy'];
+if ($user['role'] === 'distributor') {
+    $allowedTabs = array_merge($allowedTabs, ['kyc', 'documents', 'team', 'bv', 'genealogy']);
+}
 if (!in_array($tab, $allowedTabs, true)) {
     $tab = 'overview';
 }
@@ -14,6 +17,15 @@ $txRows = $tx->fetchAll();
 $cardProducts = db()->query("SELECT * FROM products WHERE product_type = 'discount_points' AND is_active = 1 ORDER BY selling_price ASC LIMIT 5")->fetchAll();
 $activeCards = active_cards((int)$user['id']);
 $cardTotals = card_totals((int)$user['id']);
+$teamRows = $user['role'] === 'distributor' ? distributor_team((int)$user['id']) : [];
+$refLink = $user['role'] === 'distributor' ? 'index.php?page=signup&type=distributor&ref=' . urlencode((string)$user['distributor_uid']) : '';
+$bvRows = $user['role'] === 'distributor' ? distributor_bv_transactions((int)$user['id']) : [];
+$bvTotal = $user['role'] === 'distributor' ? distributor_bv_total((int)$user['id']) : 0;
+$commissionTotal = $user['role'] === 'distributor' ? distributor_commission_total((int)$user['id']) : 0;
+$bvSummary = $user['role'] === 'distributor' ? distributor_monthly_bv_summary((int)$user['id']) : [];
+$selectedBvMonth = $user['role'] === 'distributor' ? valid_bv_month($_GET['bv_month'] ?? '', $bvSummary['current_month']) : '';
+$branchRows = $user['role'] === 'distributor' ? distributor_branch_bv_rows((int)$user['id'], $selectedBvMonth) : [];
+$tree = $user['role'] === 'distributor' ? distributor_genealogy_tree((int)$user['id']) : [];
 ?>
 <section class="account-hero">
     <div class="account-avatar"><?= e(strtoupper(substr($user['name'], 0, 1))) ?></div>
@@ -31,6 +43,13 @@ $cardTotals = card_totals((int)$user['id']);
         <a class="<?= $tab === 'wallet' ? 'active' : '' ?>" href="index.php?page=profile&tab=wallet">My Wallet</a>
         <a class="<?= $tab === 'discount_card' ? 'active' : '' ?>" href="index.php?page=profile&tab=discount_card">Discount Card</a>
         <a class="<?= $tab === 'orders' ? 'active' : '' ?>" href="index.php?page=profile&tab=orders">Orders</a>
+        <?php if ($user['role'] === 'distributor'): ?>
+            <a class="<?= $tab === 'kyc' ? 'active' : '' ?>" href="index.php?page=profile&tab=kyc">Distributor KYC</a>
+            <a class="<?= $tab === 'documents' ? 'active' : '' ?>" href="index.php?page=profile&tab=documents">Letters & ID</a>
+            <a class="<?= $tab === 'team' ? 'active' : '' ?>" href="index.php?page=profile&tab=team">My Team</a>
+            <a class="<?= $tab === 'bv' ? 'active' : '' ?>" href="index.php?page=profile&tab=bv">BV Points</a>
+            <a class="<?= $tab === 'genealogy' ? 'active' : '' ?>" href="index.php?page=profile&tab=genealogy">Genealogy</a>
+        <?php endif; ?>
         <a class="<?= $tab === 'terms' ? 'active' : '' ?>" href="index.php?page=profile&tab=terms">Terms</a>
         <a class="<?= $tab === 'privacy' ? 'active' : '' ?>" href="index.php?page=profile&tab=privacy">Privacy</a>
         <a class="danger-link" href="index.php?action=logout">Logout</a>
@@ -47,6 +66,13 @@ $cardTotals = card_totals((int)$user['id']);
                 <div class="stats">Orders<b><?= count($orderRows) ?></b></div>
                 <div class="stats">Role<b><?= e($user['role']) ?></b></div>
             </div><br>
+            <?php if ($user['role'] === 'distributor'): ?>
+                <div class="grid-3">
+                    <div class="stats">Distributor ID<b><?= e($user['distributor_uid']) ?></b></div>
+                    <div class="stats">KYC Status<b><?= e(ucwords(str_replace('_', ' ', $user['kyc_status']))) ?></b></div>
+                    <div class="stats">BV Points<b><?= $bvTotal ?></b></div>
+                </div><br>
+            <?php endif; ?>
             <div class="grid-2">
                 <section class="wallet-card">
                     <p>Reward Wallet</p>
@@ -138,6 +164,136 @@ $cardTotals = card_totals((int)$user['id']);
                         </tr>
                     <?php endforeach; ?>
                 </table>
+            </section>
+        <?php endif; ?>
+
+        <?php if ($tab === 'kyc' && $user['role'] === 'distributor'): ?>
+            <section class="panel">
+                <h2 class="section-title">Distributor KYC</h2>
+                <p class="section-kicker">Upload PAN, bank proof, ID proof and optional GST document.</p><br>
+                <form method="post" enctype="multipart/form-data" class="form-grid">
+                    <input type="hidden" name="action" value="update_distributor_kyc">
+                    <div class="field"><label>PAN Number</label><input name="pan_number" value="<?= e($user['pan_number']) ?>" required></div>
+                    <div class="field"><label>PAN Upload</label><input type="file" name="pan_file" accept=".jpg,.jpeg,.png,.webp,.pdf"></div>
+                    <div class="field"><label>Bank Account Number</label><input name="bank_account_number" value="<?= e($user['bank_account_number']) ?>" required></div>
+                    <div class="field"><label>Bank IFSC</label><input name="bank_ifsc" value="<?= e($user['bank_ifsc']) ?>" required></div>
+                    <div class="field full"><label>Bank Proof Upload</label><input type="file" name="bank_file" accept=".jpg,.jpeg,.png,.webp,.pdf"></div>
+                    <div class="field"><label>ID Proof Type</label><select name="id_proof_type" required>
+                        <?php foreach (['Aadhaar Card', 'Voter ID', 'Driving Licence', 'Passport'] as $type): ?>
+                            <option value="<?= e($type) ?>" <?= $user['id_proof_type'] === $type ? 'selected' : '' ?>><?= e($type) ?></option>
+                        <?php endforeach; ?>
+                    </select></div>
+                    <div class="field"><label>ID Proof Upload</label><input type="file" name="id_proof_file" accept=".jpg,.jpeg,.png,.webp,.pdf"></div>
+                    <div class="field"><label>GST Number</label><input name="gst_number" value="<?= e($user['gst_number']) ?>" placeholder="Optional"></div>
+                    <div class="field"><label>GST Upload</label><input type="file" name="gst_file" accept=".jpg,.jpeg,.png,.webp,.pdf"></div>
+                    <button class="pill-btn full">Submit KYC</button>
+                </form><br>
+                <div class="doc-actions">
+                    <?php foreach (['PAN' => 'pan_file', 'Bank Proof' => 'bank_file', 'ID Proof' => 'id_proof_file', 'GST' => 'gst_file'] as $label => $key): ?>
+                        <?php if (!empty($user[$key])): ?><a class="see-all-btn" href="<?= e($user[$key]) ?>" target="_blank"><?= e($label) ?></a><?php endif; ?>
+                    <?php endforeach; ?>
+                </div>
+            </section>
+        <?php endif; ?>
+
+        <?php if ($tab === 'documents' && $user['role'] === 'distributor'): ?>
+            <div class="grid-2">
+                <section class="panel letter-doc">
+                    <span>Welcome Letter</span>
+                    <h2>Welcome to VMCmarts Distributor Network</h2>
+                    <p>Dear <?= e($user['name']) ?>, your distributor account has been created successfully.</p>
+                    <p><b>Distributor ID:</b> <?= e($user['distributor_uid']) ?></p>
+                    <p><b>KYC Status:</b> <?= e(ucwords(str_replace('_', ' ', $user['kyc_status']))) ?></p>
+                </section>
+                <section class="panel id-card-doc">
+                    <span>VMCmarts</span>
+                    <h2>Distributor ID Card</h2>
+                    <div class="account-avatar"><?= e(strtoupper(substr($user['name'], 0, 1))) ?></div>
+                    <p><b><?= e($user['name']) ?></b></p>
+                    <p>ID: <?= e($user['distributor_uid']) ?></p>
+                    <p>Phone: <?= e($user['phone']) ?></p>
+                </section>
+            </div>
+        <?php endif; ?>
+
+        <?php if ($tab === 'team' && $user['role'] === 'distributor'): ?>
+            <section class="panel">
+                <h2 class="section-title">My Team</h2><br>
+                <div class="ref-box"><?= e($user['distributor_uid']) ?></div>
+                <p class="small">Referral signup link: <a href="<?= e($refLink) ?>"><?= e($refLink) ?></a></p><br>
+                <table class="table">
+                    <tr><th>Name</th><th>Email</th><th>Phone</th><th>Role</th><th>Joined</th></tr>
+                    <?php foreach ($teamRows as $member): ?>
+                        <tr><td><?= e($member['name']) ?></td><td><?= e($member['email']) ?></td><td><?= e($member['phone']) ?></td><td><?= e($member['role']) ?></td><td><?= e($member['created_at']) ?></td></tr>
+                    <?php endforeach; ?>
+                    <?php if (!$teamRows): ?><tr><td colspan="5">No team members yet.</td></tr><?php endif; ?>
+                </table>
+            </section>
+        <?php endif; ?>
+
+        <?php if ($tab === 'bv' && $user['role'] === 'distributor'): ?>
+            <div class="grid-3">
+                <div class="stats">Total BV Points<b><?= $bvTotal ?></b></div>
+                <div class="stats">Current TBV<b><?= $bvSummary['current']['tbv'] ?></b></div>
+                <div class="stats">Commission Earned<b><?= money($commissionTotal) ?></b></div>
+            </div><br>
+            <section class="panel">
+                <h2 class="section-title">Monthly BV Points</h2><br>
+                <table class="table">
+                    <tr><th>Month</th><th>PBV</th><th>GBV</th><th>TBV</th><th>Earnings</th><th>Details</th></tr>
+                    <tr><td>Current Month (<?= e($bvSummary['current_month']) ?>)</td><td><?= $bvSummary['current']['pbv'] ?></td><td><?= $bvSummary['current']['gbv'] ?></td><td><?= $bvSummary['current']['tbv'] ?></td><td><?= money($bvSummary['current']['earnings']) ?></td><td><a class="see-all-btn" href="index.php?page=profile&tab=bv&bv_month=<?= e($bvSummary['current_month']) ?>">Show</a></td></tr>
+                    <tr><td>Previous Month (<?= e($bvSummary['previous_month']) ?>)</td><td><?= $bvSummary['previous']['pbv'] ?></td><td><?= $bvSummary['previous']['gbv'] ?></td><td><?= $bvSummary['previous']['tbv'] ?></td><td><?= money($bvSummary['previous']['earnings']) ?></td><td><a class="see-all-btn" href="index.php?page=profile&tab=bv&bv_month=<?= e($bvSummary['previous_month']) ?>">Show</a></td></tr>
+                </table>
+            </section><br>
+            <section class="panel">
+                <h2 class="section-title">Team BV Details - <?= e($selectedBvMonth) ?></h2>
+                <p class="section-kicker">Direct member earned BV, their group BV, and their total business for the selected month.</p><br>
+                <table class="table">
+                    <tr><th>Direct Member</th><th>Earned BV</th><th>Group BV</th><th>Total BV</th><th>Role</th></tr>
+                    <?php foreach ($branchRows as $row): ?>
+                        <tr>
+                            <td><?= e($row['member']['name']) ?><br><span class="small"><?= e($row['member']['email']) ?></span></td>
+                            <td><?= (int)$row['pbv'] ?></td>
+                            <td><?= (int)$row['gbv'] ?></td>
+                            <td><?= (int)$row['tbv'] ?></td>
+                            <td><?= e($row['member']['role']) ?></td>
+                        </tr>
+                    <?php endforeach; ?>
+                    <?php if (!$branchRows): ?><tr><td colspan="5">No team BV found for this month.</td></tr><?php endif; ?>
+                </table>
+            </section><br>
+            <div class="grid-3">
+                <div class="stats">PBV<b><?= $bvSummary['current']['pbv'] ?></b></div>
+                <div class="stats">GBV<b><?= $bvSummary['current']['gbv'] ?></b></div>
+                <div class="stats">Direct Downline<b><?= count($teamRows) ?></b></div>
+            </div><br>
+            <section class="panel">
+                <h2 class="section-title">BV Points Ledger</h2><br>
+                <table class="table">
+                    <tr><th>Type</th><th>Level</th><th>BV Points</th><th>Rate</th><th>Earning</th><th>Source</th><th>Month</th><th>Note</th><th>Date</th></tr>
+                    <?php foreach ($bvRows as $row): ?>
+                        <tr>
+                            <td><?= e(str_replace('_', ' ', $row['type'])) ?></td>
+                            <td><?= $row['level_no'] ? 'L' . (int)$row['level_no'] : '-' ?></td>
+                            <td><?= (int)$row['points'] ?></td>
+                            <td><?= $row['commission_percent'] !== null ? e(rtrim(rtrim((string)$row['commission_percent'], '0'), '.')) . '%' : '-' ?></td>
+                            <td><?= money((float)$row['commission_amount']) ?></td>
+                            <td><?= e($row['source_name'] ?? 'Admin') ?></td>
+                            <td><?= e($row['share_month']) ?></td>
+                            <td><?= e($row['note']) ?></td>
+                            <td><?= e($row['created_at']) ?></td>
+                        </tr>
+                    <?php endforeach; ?>
+                    <?php if (!$bvRows): ?><tr><td colspan="9">No BV points yet.</td></tr><?php endif; ?>
+                </table>
+            </section>
+        <?php endif; ?>
+
+        <?php if ($tab === 'genealogy' && $user['role'] === 'distributor'): ?>
+            <section class="panel">
+                <h2 class="section-title">Genealogy Tree</h2>
+                <p class="section-kicker">Direct downline and group structure under your distributor ID.</p><br>
+                <ul class="genealogy-tree"><?php if ($tree) render_genealogy_node($tree); ?></ul>
             </section>
         <?php endif; ?>
 

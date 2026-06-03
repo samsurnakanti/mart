@@ -44,7 +44,13 @@ function current_user(): ?array
     sync_reward_wallet_points(db(), (int)$_SESSION['user_id']);
     $stmt = db()->prepare('SELECT * FROM users WHERE id = ?');
     $stmt->execute([$_SESSION['user_id']]);
-    return $stmt->fetch() ?: null;
+    $user = $stmt->fetch() ?: null;
+    if ($user && $user['role'] === 'distributor' && empty($user['distributor_uid'])) {
+        assign_distributor_uid((int)$user['id']);
+        $stmt->execute([$_SESSION['user_id']]);
+        $user = $stmt->fetch() ?: $user;
+    }
+    return $user;
 }
 
 function require_login(): array
@@ -75,22 +81,41 @@ function require_super_admin(): array
     return $user;
 }
 
+function require_distributor(): array
+{
+    $user = require_login();
+    if ($user['role'] !== 'distributor') {
+        throw new RuntimeException('Distributor access required.');
+    }
+    if (empty($user['distributor_uid'])) {
+        assign_distributor_uid((int)$user['id']);
+        $user = current_user() ?: $user;
+    }
+    return $user;
+}
+
 function signup(array $data): void
 {
     $name = trim($data['name'] ?? '');
     $email = strtolower(trim($data['email'] ?? ''));
     $phone = trim($data['phone'] ?? '');
     $password = (string)($data['password'] ?? '');
+    $role = ($data['account_type'] ?? 'user') === 'distributor' ? 'distributor' : 'user';
+    $sponsorId = sponsor_id_from_ref(trim($data['referral_id'] ?? ''));
     if ($name === '' || !filter_var($email, FILTER_VALIDATE_EMAIL) || strlen($password) < 6) {
         throw new RuntimeException('Enter name, valid email, and 6 character password.');
     }
-    $stmt = db()->prepare('INSERT INTO users (name,email,phone,password_hash) VALUES (?,?,?,?)');
-    $stmt->execute([$name, $email, $phone, password_hash($password, PASSWORD_DEFAULT)]);
-    $_SESSION['user_id'] = (int)db()->lastInsertId();
+    $stmt = db()->prepare('INSERT INTO users (name,email,phone,password_hash,role,sponsor_distributor_id) VALUES (?,?,?,?,?,?)');
+    $stmt->execute([$name, $email, $phone, password_hash($password, PASSWORD_DEFAULT), $role, $sponsorId]);
+    $userId = (int)db()->lastInsertId();
+    if ($role === 'distributor') {
+        assign_distributor_uid($userId);
+    }
+    $_SESSION['user_id'] = $userId;
     flash('ok', 'Welcome to VMCmarts.');
 }
 
-function login(string $login, string $password): void
+function login(string $login, string $password, ?string $requiredRole = null): void
 {
     $login = trim($login);
     $stmt = db()->prepare('SELECT * FROM users WHERE phone = ? OR email = ?');
@@ -99,8 +124,41 @@ function login(string $login, string $password): void
     if (!$user || !password_verify($password, $user['password_hash'])) {
         throw new RuntimeException('Invalid mobile number or password.');
     }
+    if ($requiredRole !== null && $user['role'] !== $requiredRole) {
+        throw new RuntimeException('Use the correct login for this account type.');
+    }
     $_SESSION['user_id'] = (int)$user['id'];
+    if ($user['role'] === 'distributor' && empty($user['distributor_uid'])) {
+        assign_distributor_uid((int)$user['id']);
+    }
     flash('ok', 'Logged in successfully.');
+}
+
+function assign_distributor_uid(int $userId): string
+{
+    $stmt = db()->prepare('SELECT distributor_uid FROM users WHERE id = ?');
+    $stmt->execute([$userId]);
+    $existing = (string)($stmt->fetchColumn() ?: '');
+    if ($existing !== '') {
+        return $existing;
+    }
+    $uid = 'VMC-D' . str_pad((string)$userId, 6, '0', STR_PAD_LEFT);
+    db()->prepare('UPDATE users SET distributor_uid = ? WHERE id = ?')->execute([$uid, $userId]);
+    return $uid;
+}
+
+function sponsor_id_from_ref(string $ref): ?int
+{
+    if ($ref === '') {
+        return null;
+    }
+    $stmt = db()->prepare("SELECT id FROM users WHERE distributor_uid = ? AND role = 'distributor' LIMIT 1");
+    $stmt->execute([$ref]);
+    $id = $stmt->fetchColumn();
+    if (!$id) {
+        throw new RuntimeException('Referral distributor ID was not found.');
+    }
+    return (int)$id;
 }
 
 function update_profile(array $data): void
@@ -113,6 +171,48 @@ function update_profile(array $data): void
         throw new RuntimeException('Enter a valid name and email.');
     }
     db()->prepare('UPDATE users SET name = ?, email = ?, phone = ? WHERE id = ?')->execute([$name, $email, $phone, $user['id']]);
+}
+
+function update_distributor_kyc(array $data, array $files): void
+{
+    $user = require_distributor();
+    $pan = strtoupper(trim($data['pan_number'] ?? ''));
+    $bankAccount = trim($data['bank_account_number'] ?? '');
+    $bankIfsc = strtoupper(trim($data['bank_ifsc'] ?? ''));
+    $idProofType = trim($data['id_proof_type'] ?? '');
+    $gst = strtoupper(trim($data['gst_number'] ?? ''));
+    if ($pan === '' || $bankAccount === '' || $bankIfsc === '' || $idProofType === '') {
+        throw new RuntimeException('PAN, bank account, IFSC and ID proof type are required.');
+    }
+    $paths = [];
+    foreach (['pan_file', 'bank_file', 'id_proof_file', 'gst_file'] as $key) {
+        $paths[$key] = upload_document($files[$key] ?? []);
+    }
+    foreach (['pan_file' => 'PAN document', 'bank_file' => 'bank proof', 'id_proof_file' => 'ID proof'] as $key => $label) {
+        if (empty($user[$key]) && $paths[$key] === null) {
+            throw new RuntimeException('Upload ' . $label . '.');
+        }
+    }
+    db()->prepare('
+        UPDATE users
+        SET pan_number = ?, bank_account_number = ?, bank_ifsc = ?, id_proof_type = ?, gst_number = ?,
+            pan_file = COALESCE(?, pan_file), bank_file = COALESCE(?, bank_file),
+            id_proof_file = COALESCE(?, id_proof_file), gst_file = COALESCE(?, gst_file),
+            kyc_status = ?
+        WHERE id = ?
+    ')->execute([
+        $pan,
+        $bankAccount,
+        $bankIfsc,
+        $idProofType,
+        $gst,
+        $paths['pan_file'],
+        $paths['bank_file'],
+        $paths['id_proof_file'],
+        $paths['gst_file'],
+        'submitted',
+        $user['id'],
+    ]);
 }
 
 function cart(): array
@@ -237,10 +337,10 @@ function place_order(array $data): int
     ]);
     $orderId = (int)$pdo->lastInsertId();
 
-    $item = $pdo->prepare('INSERT INTO order_items (order_id,product_id,product_name,qty,unit_price,tax_amount,points_value,product_type) VALUES (?,?,?,?,?,?,?,?)');
+    $item = $pdo->prepare('INSERT INTO order_items (order_id,product_id,product_name,qty,unit_price,tax_amount,points_value,bv_points,product_type) VALUES (?,?,?,?,?,?,?,?,?)');
     $stock = $pdo->prepare('UPDATE products SET stock = GREATEST(0, stock - ?) WHERE id = ?');
     foreach ($rows as $row) {
-        $item->execute([$orderId, $row['id'], $row['name'], $row['qty'], $row['selling_price'], $row['line_tax'], $row['discount_points'], $row['product_type']]);
+        $item->execute([$orderId, $row['id'], $row['name'], $row['qty'], $row['selling_price'], $row['line_tax'], $row['discount_points'], $row['bv_points'] ?? 0, $row['product_type']]);
         $stock->execute([$row['qty'], $row['id']]);
     }
 
@@ -279,6 +379,33 @@ function upload_image(array $file): ?string
         mkdir($dir, 0775, true);
     }
     $name = 'uploads/product_' . date('YmdHis') . '_' . bin2hex(random_bytes(4)) . '.' . $allowed[$mime];
+    move_uploaded_file($file['tmp_name'], __DIR__ . '/../' . $name);
+    return $name;
+}
+
+function upload_document(array $file): ?string
+{
+    if (($file['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_NO_FILE) {
+        return null;
+    }
+    if (($file['error'] ?? UPLOAD_ERR_OK) !== UPLOAD_ERR_OK) {
+        throw new RuntimeException('Document upload failed.');
+    }
+    $allowed = [
+        'image/jpeg' => 'jpg',
+        'image/png' => 'png',
+        'image/webp' => 'webp',
+        'application/pdf' => 'pdf',
+    ];
+    $mime = mime_content_type($file['tmp_name']);
+    if (!isset($allowed[$mime])) {
+        throw new RuntimeException('Only JPG, PNG, WEBP, or PDF documents are allowed.');
+    }
+    $dir = __DIR__ . '/../uploads/kyc';
+    if (!is_dir($dir)) {
+        mkdir($dir, 0775, true);
+    }
+    $name = 'uploads/kyc/doc_' . date('YmdHis') . '_' . bin2hex(random_bytes(4)) . '.' . $allowed[$mime];
     move_uploaded_file($file['tmp_name'], __DIR__ . '/../' . $name);
     return $name;
 }
@@ -382,6 +509,7 @@ function save_product(array $data, array $files): void
         (float)($data['selling_price'] ?? 0),
         (float)($data['tax_percent'] ?? 0),
         (int)($data['discount_points'] ?? 0),
+        max(0, (int)($data['bv_points'] ?? 0)),
         (int)($data['stock'] ?? 0),
         ($data['product_type'] ?? 'regular') === 'discount_points' ? 'discount_points' : 'regular',
         isset($data['is_active']) ? 1 : 0,
@@ -397,17 +525,17 @@ function save_product(array $data, array $files): void
 
     if ($id > 0) {
         if ($image) {
-            db()->prepare('UPDATE products SET name=?,category=?,description=?,mrp=?,selling_price=?,tax_percent=?,discount_points=?,stock=?,product_type=?,is_active=?,image_path=? WHERE id=?')
+            db()->prepare('UPDATE products SET name=?,category=?,description=?,mrp=?,selling_price=?,tax_percent=?,discount_points=?,bv_points=?,stock=?,product_type=?,is_active=?,image_path=? WHERE id=?')
                 ->execute([...$values, $image, $id]);
         } else {
-            db()->prepare('UPDATE products SET name=?,category=?,description=?,mrp=?,selling_price=?,tax_percent=?,discount_points=?,stock=?,product_type=?,is_active=? WHERE id=?')
+            db()->prepare('UPDATE products SET name=?,category=?,description=?,mrp=?,selling_price=?,tax_percent=?,discount_points=?,bv_points=?,stock=?,product_type=?,is_active=? WHERE id=?')
                 ->execute([...$values, $id]);
         }
         save_product_gallery_images($id, $files['images'] ?? []);
         return;
     }
 
-    db()->prepare('INSERT INTO products (name,category,description,mrp,selling_price,tax_percent,discount_points,stock,product_type,is_active,image_path) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
+    db()->prepare('INSERT INTO products (name,category,description,mrp,selling_price,tax_percent,discount_points,bv_points,stock,product_type,is_active,image_path) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)')
         ->execute([...$values, $image]);
     $newId = (int)db()->lastInsertId();
     save_product_gallery_images($newId, $files['images'] ?? []);
@@ -469,7 +597,7 @@ function update_inventory(array $stockRows): void
 function save_user(array $data): void
 {
     $id = (int)($data['id'] ?? 0);
-    $role = in_array($data['role'] ?? 'user', ['user', 'admin', 'super_admin'], true) ? $data['role'] : 'user';
+    $role = in_array($data['role'] ?? 'user', ['user', 'distributor', 'admin', 'super_admin'], true) ? $data['role'] : 'user';
     $points = max(0, (int)($data['wallet_points'] ?? 0));
     if ($id <= 0) {
         $password = (string)($data['password'] ?? '');
@@ -478,6 +606,9 @@ function save_user(array $data): void
         }
         db()->prepare('INSERT INTO users (name,email,phone,password_hash,role,wallet_points) VALUES (?,?,?,?,?,?)')
             ->execute([trim($data['name'] ?? ''), strtolower(trim($data['email'] ?? '')), trim($data['phone'] ?? ''), password_hash($password, PASSWORD_DEFAULT), $role, $points]);
+        if ($role === 'distributor') {
+            assign_distributor_uid((int)db()->lastInsertId());
+        }
         return;
     }
     $password = (string)($data['password'] ?? '');
@@ -491,6 +622,327 @@ function save_user(array $data): void
     }
     db()->prepare('UPDATE users SET name=?, email=?, phone=?, role=?, wallet_points=? WHERE id=?')
         ->execute([trim($data['name'] ?? ''), strtolower(trim($data['email'] ?? '')), trim($data['phone'] ?? ''), $role, $points, $id]);
+    if ($role === 'distributor') {
+        assign_distributor_uid($id);
+    }
+}
+
+function distributor_team(int $distributorId): array
+{
+    $stmt = db()->prepare('SELECT * FROM users WHERE sponsor_distributor_id = ? ORDER BY id DESC');
+    $stmt->execute([$distributorId]);
+    return $stmt->fetchAll();
+}
+
+function distributor_direct_downline(int $distributorId): array
+{
+    $stmt = db()->prepare('
+        SELECT u.*,
+            COALESCE((SELECT SUM(points) FROM bv_transactions b WHERE b.distributor_id = u.id),0) AS bv_total
+        FROM users u
+        WHERE u.sponsor_distributor_id = ?
+        ORDER BY u.created_at DESC, u.id DESC
+    ');
+    $stmt->execute([$distributorId]);
+    return $stmt->fetchAll();
+}
+
+function distributor_bv_total(int $distributorId, ?string $month = null): int
+{
+    $sql = 'SELECT COALESCE(SUM(points),0) FROM bv_transactions WHERE distributor_id = ?';
+    $params = [$distributorId];
+    if ($month !== null && $month !== '') {
+        $sql .= ' AND share_month = ?';
+        $params[] = $month;
+    }
+    $stmt = db()->prepare($sql);
+    $stmt->execute($params);
+    return (int)$stmt->fetchColumn();
+}
+
+function distributor_commission_total(int $distributorId, ?string $month = null): float
+{
+    $sql = 'SELECT COALESCE(SUM(commission_amount),0) FROM bv_transactions WHERE distributor_id = ?';
+    $params = [$distributorId];
+    if ($month !== null && $month !== '') {
+        $sql .= ' AND share_month = ?';
+        $params[] = $month;
+    }
+    $stmt = db()->prepare($sql);
+    $stmt->execute($params);
+    return (float)$stmt->fetchColumn();
+}
+
+function bv_months(): array
+{
+    $now = new DateTimeImmutable('first day of this month');
+    return [
+        'current' => $now->format('Y-m'),
+        'previous' => $now->modify('-1 month')->format('Y-m'),
+    ];
+}
+
+function distributor_bv_breakdown(int $distributorId, ?string $month = null): array
+{
+    $sql = "
+        SELECT
+            COALESCE(SUM(CASE WHEN type IN ('self','individual') THEN points ELSE 0 END),0) AS pbv,
+            COALESCE(SUM(CASE WHEN type NOT IN ('self','individual') THEN points ELSE 0 END),0) AS gbv,
+            COALESCE(SUM(points),0) AS tbv,
+            COALESCE(SUM(commission_amount),0) AS earnings
+        FROM bv_transactions
+        WHERE distributor_id = ?
+    ";
+    $params = [$distributorId];
+    if ($month !== null && $month !== '') {
+        $sql .= ' AND share_month = ?';
+        $params[] = $month;
+    }
+    $stmt = db()->prepare($sql);
+    $stmt->execute($params);
+    $row = $stmt->fetch() ?: [];
+    return [
+        'pbv' => (int)($row['pbv'] ?? 0),
+        'gbv' => (int)($row['gbv'] ?? 0),
+        'tbv' => (int)($row['tbv'] ?? 0),
+        'earnings' => (float)($row['earnings'] ?? 0),
+    ];
+}
+
+function distributor_monthly_bv_summary(int $distributorId): array
+{
+    $months = bv_months();
+    return [
+        'current_month' => $months['current'],
+        'previous_month' => $months['previous'],
+        'current' => distributor_bv_breakdown($distributorId, $months['current']),
+        'previous' => distributor_bv_breakdown($distributorId, $months['previous']),
+    ];
+}
+
+function valid_bv_month(string $month, ?string $fallback = null): string
+{
+    if (preg_match('/^\d{4}-\d{2}$/', $month)) {
+        return $month;
+    }
+    return $fallback ?: bv_months()['current'];
+}
+
+function direct_member_bv_generated_for_sponsor(int $sponsorId, int $memberId, string $month): int
+{
+    $stmt = db()->prepare("
+        SELECT COALESCE(SUM(points),0)
+        FROM bv_transactions
+        WHERE distributor_id = ?
+          AND source_user_id = ?
+          AND type = 'direct_downline'
+          AND share_month = ?
+    ");
+    $stmt->execute([$sponsorId, $memberId, $month]);
+    return (int)$stmt->fetchColumn();
+}
+
+function distributor_branch_bv_rows(int $distributorId, string $month): array
+{
+    $month = valid_bv_month($month);
+    $rows = [];
+    foreach (distributor_direct_downline($distributorId) as $member) {
+        $directGenerated = direct_member_bv_generated_for_sponsor($distributorId, (int)$member['id'], $month);
+        $memberSummary = $member['role'] === 'distributor'
+            ? distributor_bv_breakdown((int)$member['id'], $month)
+            : ['pbv' => $directGenerated, 'gbv' => 0, 'tbv' => $directGenerated];
+        $rows[] = [
+            'member' => $member,
+            'direct_generated' => $directGenerated,
+            'pbv' => $memberSummary['pbv'],
+            'gbv' => $memberSummary['gbv'],
+            'tbv' => $memberSummary['tbv'],
+        ];
+    }
+    return $rows;
+}
+
+function distributor_bv_transactions(int $distributorId, int $limit = 50): array
+{
+    $stmt = db()->prepare('
+        SELECT b.*, u.name AS source_name
+        FROM bv_transactions b
+        LEFT JOIN users u ON u.id = b.source_user_id
+        WHERE b.distributor_id = ?
+        ORDER BY b.id DESC
+        LIMIT ' . max(1, $limit)
+    );
+    $stmt->execute([$distributorId]);
+    return $stmt->fetchAll();
+}
+
+function distributor_genealogy_tree(int $distributorId, int $depth = 4): array
+{
+    $rootStmt = db()->prepare('SELECT * FROM users WHERE id = ?');
+    $rootStmt->execute([$distributorId]);
+    $root = $rootStmt->fetch();
+    if (!$root) {
+        return [];
+    }
+    $root['children'] = genealogy_children($distributorId, $depth);
+    return $root;
+}
+
+function genealogy_children(int $parentId, int $depth): array
+{
+    if ($depth <= 0) {
+        return [];
+    }
+    $children = distributor_direct_downline($parentId);
+    foreach ($children as &$child) {
+        $child['children'] = $child['role'] === 'distributor' ? genealogy_children((int)$child['id'], $depth - 1) : [];
+    }
+    return $children;
+}
+
+function render_genealogy_node(array $node): void
+{
+    ?>
+    <li>
+        <div class="tree-node">
+            <b><?= e($node['name']) ?></b>
+            <span><?= e($node['role']) ?><?= !empty($node['distributor_uid']) ? ' - ' . e($node['distributor_uid']) : '' ?></span>
+            <em><?= (int)($node['bv_total'] ?? distributor_bv_total((int)$node['id'])) ?> BV</em>
+        </div>
+        <?php if (!empty($node['children'])): ?>
+            <ul><?php foreach ($node['children'] as $child) render_genealogy_node($child); ?></ul>
+        <?php endif; ?>
+    </li>
+    <?php
+}
+
+function add_monthly_bv_share(array $data): void
+{
+    require_admin();
+    $distributorId = (int)($data['distributor_id'] ?? 0);
+    $points = max(0, (int)($data['points'] ?? 0));
+    $month = trim($data['share_month'] ?? date('Y-m'));
+    $type = in_array($data['share_type'] ?? 'monthly_share', ['individual', 'team', 'group', 'monthly_share'], true) ? $data['share_type'] : 'monthly_share';
+    $note = trim($data['note'] ?? '');
+    if ($distributorId <= 0 || $points <= 0 || !preg_match('/^\d{4}-\d{2}$/', $month)) {
+        throw new RuntimeException('Select distributor, month and BV points.');
+    }
+    $stmt = db()->prepare("SELECT id FROM users WHERE id = ? AND role = 'distributor'");
+    $stmt->execute([$distributorId]);
+    if (!$stmt->fetch()) {
+        throw new RuntimeException('Distributor not found.');
+    }
+    db()->prepare('INSERT INTO bv_transactions (distributor_id,points,type,share_month,note) VALUES (?,?,?,?,?)')
+        ->execute([$distributorId, $points, $type, $month, $note !== '' ? $note : 'Monthly BV share by admin']);
+}
+
+function bv_level_commission_rates(): array
+{
+    return [
+        1 => 18.0,
+        2 => 5.0,
+        3 => 2.0,
+        4 => 2.0,
+        5 => 1.0,
+        6 => 1.0,
+        7 => 1.0,
+    ];
+}
+
+function bv_level_commission_points(int $points): array
+{
+    $target = (int)round($points * 0.30);
+    $shares = [];
+    $remainders = [];
+    foreach (bv_level_commission_rates() as $level => $percent) {
+        $raw = $points * ($percent / 100);
+        $shares[$level] = (int)floor($raw);
+        $remainders[$level] = $raw - $shares[$level];
+    }
+
+    $remaining = max(0, $target - array_sum($shares));
+    arsort($remainders);
+    foreach (array_keys($remainders) as $level) {
+        if ($remaining <= 0) {
+            break;
+        }
+        $shares[$level]++;
+        $remaining--;
+    }
+    ksort($shares);
+    return $shares;
+}
+
+function credit_order_bv(PDO $pdo, array $order): void
+{
+    $items = $pdo->prepare('SELECT * FROM order_items WHERE order_id = ? AND bv_points > 0');
+    $items->execute([$order['id']]);
+    $rows = $items->fetchAll();
+    if (!$rows) {
+        return;
+    }
+    $buyerStmt = $pdo->prepare('SELECT * FROM users WHERE id = ?');
+    $buyerStmt->execute([$order['user_id']]);
+    $buyer = $buyerStmt->fetch();
+    if (!$buyer) {
+        return;
+    }
+    $insert = $pdo->prepare('
+        INSERT INTO bv_transactions
+            (distributor_id,source_user_id,order_id,source_order_item_id,points,commission_amount,commission_percent,level_no,type,share_month,note)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?)
+    ');
+    $exists = $pdo->prepare('SELECT id FROM bv_transactions WHERE distributor_id = ? AND source_order_item_id = ? AND level_no <=> ? AND type = ? LIMIT 1');
+    foreach ($rows as $item) {
+        $points = (int)$item['bv_points'] * (int)$item['qty'];
+        if ($points <= 0) {
+            continue;
+        }
+        if ($buyer['role'] === 'distributor') {
+            insert_bv_once($exists, $insert, (int)$buyer['id'], (int)$buyer['id'], (int)$order['id'], (int)$item['id'], $points, 0.0, null, null, 'self', 'Self purchase BV');
+        }
+        $uplineId = (int)($buyer['sponsor_distributor_id'] ?? 0);
+        $commissionPointShares = bv_level_commission_points($points);
+        foreach (bv_level_commission_rates() as $level => $percent) {
+            if ($uplineId <= 0) {
+                break;
+            }
+            $commission = round($points * ($percent / 100), 2);
+            $commissionPoints = $commissionPointShares[$level] ?? 0;
+            $type = $level === 1 ? 'direct_downline' : 'team';
+            insert_bv_once(
+                $exists,
+                $insert,
+                $uplineId,
+                (int)$buyer['id'],
+                (int)$order['id'],
+                (int)$item['id'],
+                $commissionPoints,
+                $commission,
+                $percent,
+                (int)$level,
+                $type,
+                'Level ' . $level . ' commission from ' . $points . ' BV at ' . rtrim(rtrim((string)$percent, '0'), '.') . '%'
+            );
+            $uplineId = sponsor_distributor_id($pdo, $uplineId);
+        }
+    }
+}
+
+function sponsor_distributor_id(PDO $pdo, int $userId): int
+{
+    $stmt = $pdo->prepare("SELECT sponsor_distributor_id FROM users WHERE id = ? AND role = 'distributor' LIMIT 1");
+    $stmt->execute([$userId]);
+    return (int)($stmt->fetchColumn() ?: 0);
+}
+
+function insert_bv_once(PDOStatement $exists, PDOStatement $insert, int $distributorId, int $sourceUserId, int $orderId, int $itemId, int $points, float $commissionAmount, ?float $commissionPercent, ?int $levelNo, string $type, string $note): void
+{
+    $exists->execute([$distributorId, $itemId, $levelNo, $type]);
+    if ($exists->fetch()) {
+        return;
+    }
+    $insert->execute([$distributorId, $sourceUserId, $orderId, $itemId, $points, $commissionAmount, $commissionPercent, $levelNo, $type, date('Y-m'), $note]);
 }
 
 function change_own_password(array $data): void
@@ -620,6 +1072,7 @@ function complete_order(int $orderId, int $pointsToAllot): void
             ->execute([$order['user_id'], $orderId, $rewardPoints, 'credit', 'Reward points granted by admin']);
     }
     activate_cards_for_order($pdo, $orderId, (int)$order['user_id']);
+    credit_order_bv($pdo, $order);
     sync_reward_wallet_points($pdo, (int)$order['user_id']);
     $pdo->prepare("UPDATE orders SET status = 'Completed' WHERE id = ?")->execute([$orderId]);
     $pdo->commit();

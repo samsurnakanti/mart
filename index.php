@@ -42,7 +42,15 @@ try {
         if ($action === 'login') {
             login($_POST['login'] ?? '', $_POST['password'] ?? '');
             $user = current_user();
-            redirect_to($user && in_array($user['role'], ['admin', 'super_admin'], true) ? 'admin' : '');
+            if ($user && in_array($user['role'], ['admin', 'super_admin'], true)) {
+                redirect_to('admin');
+            }
+            redirect_to($user && $user['role'] === 'distributor' ? 'distributor' : '');
+        }
+
+        if ($action === 'distributor_login') {
+            login($_POST['login'] ?? '', $_POST['password'] ?? '', 'distributor');
+            redirect_to('distributor');
         }
 
         if ($action === 'add_to_cart' || $action === 'buy_now') {
@@ -112,10 +120,22 @@ try {
             redirect_to('admin&module=orders');
         }
 
+        if ($action === 'add_monthly_bv_share') {
+            add_monthly_bv_share($_POST);
+            flash('ok', 'BV points shared successfully.');
+            redirect_to('admin&module=bv');
+        }
+
         if ($action === 'update_profile') {
             update_profile($_POST);
             flash('ok', 'Profile updated successfully.');
             redirect_to('profile&tab=edit');
+        }
+
+        if ($action === 'update_distributor_kyc') {
+            update_distributor_kyc($_POST, $_FILES);
+            flash('ok', 'Distributor KYC submitted successfully.');
+            redirect_to('profile&tab=kyc');
         }
 
         if ($action === 'change_own_password') {
@@ -182,7 +202,7 @@ try {
 }
 
 $page = $_GET['page'] ?? 'home';
-$allowed = ['home', 'products', 'product', 'login', 'signup', 'cart', 'checkout', 'profile', 'invoice', 'admin', 'super_admin'];
+$allowed = ['home', 'products', 'product', 'login', 'signup', 'cart', 'checkout', 'profile', 'invoice', 'admin', 'super_admin', 'distributor'];
 if (!in_array($page, $allowed, true)) {
     $page = 'home';
 }

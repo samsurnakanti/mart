@@ -38,15 +38,35 @@ function migrate(PDO $pdo): void
             email VARCHAR(160) NOT NULL UNIQUE,
             phone VARCHAR(30) DEFAULT NULL,
             password_hash VARCHAR(255) NOT NULL,
-            role ENUM('user','admin','super_admin') NOT NULL DEFAULT 'user',
+            role ENUM('user','distributor','admin','super_admin') NOT NULL DEFAULT 'user',
             wallet_points INT NOT NULL DEFAULT 0,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     ");
 
     try {
-        $pdo->exec("ALTER TABLE users MODIFY role ENUM('user','admin','super_admin') NOT NULL DEFAULT 'user'");
+        $pdo->exec("ALTER TABLE users MODIFY role ENUM('user','distributor','admin','super_admin') NOT NULL DEFAULT 'user'");
     } catch (Throwable $ignored) {
+    }
+    foreach ([
+        "ALTER TABLE users ADD distributor_uid VARCHAR(30) DEFAULT NULL UNIQUE",
+        "ALTER TABLE users ADD sponsor_distributor_id INT DEFAULT NULL",
+        "ALTER TABLE users ADD pan_number VARCHAR(20) DEFAULT NULL",
+        "ALTER TABLE users ADD pan_file VARCHAR(255) DEFAULT NULL",
+        "ALTER TABLE users ADD bank_account_number VARCHAR(40) DEFAULT NULL",
+        "ALTER TABLE users ADD bank_ifsc VARCHAR(20) DEFAULT NULL",
+        "ALTER TABLE users ADD bank_file VARCHAR(255) DEFAULT NULL",
+        "ALTER TABLE users ADD id_proof_type VARCHAR(60) DEFAULT NULL",
+        "ALTER TABLE users ADD id_proof_file VARCHAR(255) DEFAULT NULL",
+        "ALTER TABLE users ADD gst_number VARCHAR(30) DEFAULT NULL",
+        "ALTER TABLE users ADD gst_file VARCHAR(255) DEFAULT NULL",
+        "ALTER TABLE users ADD kyc_status ENUM('not_submitted','submitted','approved') NOT NULL DEFAULT 'not_submitted'",
+        "ALTER TABLE users ADD CONSTRAINT fk_users_sponsor_distributor FOREIGN KEY (sponsor_distributor_id) REFERENCES users(id) ON DELETE SET NULL",
+    ] as $sql) {
+        try {
+            $pdo->exec($sql);
+        } catch (Throwable $ignored) {
+        }
     }
 
     $pdo->exec("
@@ -84,6 +104,7 @@ function migrate(PDO $pdo): void
             selling_price DECIMAL(10,2) NOT NULL DEFAULT 0,
             tax_percent DECIMAL(5,2) NOT NULL DEFAULT 0,
             discount_points INT NOT NULL DEFAULT 0,
+            bv_points INT NOT NULL DEFAULT 0,
             stock INT NOT NULL DEFAULT 0,
             image_path VARCHAR(255) DEFAULT NULL,
             product_type ENUM('regular','discount_points') NOT NULL DEFAULT 'regular',
@@ -91,6 +112,10 @@ function migrate(PDO $pdo): void
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     ");
+    try {
+        $pdo->exec("ALTER TABLE products ADD bv_points INT NOT NULL DEFAULT 0");
+    } catch (Throwable $ignored) {
+    }
 
     $pdo->exec("
         CREATE TABLE IF NOT EXISTS product_images (
@@ -131,10 +156,47 @@ function migrate(PDO $pdo): void
             unit_price DECIMAL(10,2) NOT NULL,
             tax_amount DECIMAL(10,2) NOT NULL,
             points_value INT NOT NULL DEFAULT 0,
+            bv_points INT NOT NULL DEFAULT 0,
             product_type VARCHAR(40) NOT NULL,
             FOREIGN KEY (order_id) REFERENCES orders(id)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     ");
+    try {
+        $pdo->exec("ALTER TABLE order_items ADD bv_points INT NOT NULL DEFAULT 0");
+    } catch (Throwable $ignored) {
+    }
+
+    $pdo->exec("
+        CREATE TABLE IF NOT EXISTS bv_transactions (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            distributor_id INT NOT NULL,
+            source_user_id INT DEFAULT NULL,
+            order_id INT DEFAULT NULL,
+            source_order_item_id INT DEFAULT NULL,
+            points INT NOT NULL,
+            commission_amount DECIMAL(10,2) NOT NULL DEFAULT 0,
+            commission_percent DECIMAL(5,2) DEFAULT NULL,
+            level_no TINYINT DEFAULT NULL,
+            type ENUM('self','direct_downline','team','group','individual','monthly_share') NOT NULL,
+            share_month CHAR(7) DEFAULT NULL,
+            note VARCHAR(255) NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (distributor_id) REFERENCES users(id),
+            FOREIGN KEY (source_user_id) REFERENCES users(id),
+            FOREIGN KEY (order_id) REFERENCES orders(id),
+            FOREIGN KEY (source_order_item_id) REFERENCES order_items(id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    ");
+    foreach ([
+        "ALTER TABLE bv_transactions ADD commission_amount DECIMAL(10,2) NOT NULL DEFAULT 0",
+        "ALTER TABLE bv_transactions ADD commission_percent DECIMAL(5,2) DEFAULT NULL",
+        "ALTER TABLE bv_transactions ADD level_no TINYINT DEFAULT NULL",
+    ] as $sql) {
+        try {
+            $pdo->exec($sql);
+        } catch (Throwable $ignored) {
+        }
+    }
 
     $pdo->exec("
         CREATE TABLE IF NOT EXISTS user_cards (

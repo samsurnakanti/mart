@@ -1,7 +1,7 @@
 <?php
 $admin = require_admin();
 $module = $_GET['module'] ?? 'dashboard';
-$allowedModules = ['dashboard', 'sliders', 'categories', 'products', 'inventory', 'orders', 'reports', 'settings'];
+$allowedModules = ['dashboard', 'sliders', 'categories', 'products', 'inventory', 'orders', 'bv', 'reports', 'settings'];
 if (!in_array($module, $allowedModules, true)) {
     $module = 'dashboard';
 }
@@ -28,6 +28,25 @@ if (isset($_GET['edit_slider'])) {
 $products = db()->query('SELECT * FROM products ORDER BY id DESC')->fetchAll();
 $categories = categories();
 $sliders = sliders();
+$distributors = db()->query("SELECT * FROM users WHERE role = 'distributor' ORDER BY name")->fetchAll();
+$selectedBvDistributorId = (int)($_GET['bv_distributor'] ?? 0);
+$selectedBvMonth = valid_bv_month($_GET['bv_month'] ?? '', date('Y-m'));
+$selectedBvDistributor = null;
+foreach ($distributors as $d) {
+    if ((int)$d['id'] === $selectedBvDistributorId) {
+        $selectedBvDistributor = $d;
+        break;
+    }
+}
+$selectedBranchRows = $selectedBvDistributor ? distributor_branch_bv_rows($selectedBvDistributorId, $selectedBvMonth) : [];
+$bvRows = db()->query("
+    SELECT b.*, d.name AS distributor_name, d.distributor_uid, s.name AS source_name
+    FROM bv_transactions b
+    JOIN users d ON d.id = b.distributor_id
+    LEFT JOIN users s ON s.id = b.source_user_id
+    ORDER BY b.id DESC
+    LIMIT 100
+")->fetchAll();
 $activeCategories = array_values(array_filter($categories, fn($c) => (int)$c['is_active'] === 1));
 $orders = db()->query("SELECT o.*, u.name, u.email,
     u.wallet_points AS wallet_balance,
@@ -49,6 +68,8 @@ $stats = [
     'orders' => (int)db()->query('SELECT COUNT(*) FROM orders')->fetchColumn(),
     'sales' => (float)db()->query('SELECT COALESCE(SUM(grand_total),0) FROM orders')->fetchColumn(),
     'points' => (int)db()->query('SELECT COALESCE(SUM(total_points),0) FROM user_cards')->fetchColumn(),
+    'bv' => (int)db()->query('SELECT COALESCE(SUM(points),0) FROM bv_transactions')->fetchColumn(),
+    'bv_month' => (int)db()->query("SELECT COALESCE(SUM(points),0) FROM bv_transactions WHERE share_month = '" . date('Y-m') . "'")->fetchColumn(),
 ];
 $topProducts = db()->query('SELECT product_name, SUM(qty) qty, SUM(unit_price * qty) total FROM order_items GROUP BY product_name ORDER BY qty DESC LIMIT 8')->fetchAll();
 ?>
@@ -61,6 +82,7 @@ $topProducts = db()->query('SELECT product_name, SUM(qty) qty, SUM(unit_price * 
         <a class="<?= $module === 'products' ? 'active' : '' ?>" href="index.php?page=admin&module=products">Products</a>
         <a class="<?= $module === 'inventory' ? 'active' : '' ?>" href="index.php?page=admin&module=inventory">Inventory</a>
         <a class="<?= $module === 'orders' ? 'active' : '' ?>" href="index.php?page=admin&module=orders">Orders</a>
+        <a class="<?= $module === 'bv' ? 'active' : '' ?>" href="index.php?page=admin&module=bv">BV Share</a>
         <a class="<?= $module === 'reports' ? 'active' : '' ?>" href="index.php?page=admin&module=reports">Reports</a>
         <a class="<?= $module === 'settings' ? 'active' : '' ?>" href="index.php?page=admin&module=settings">Set Password</a>
         <?php if ($admin['role'] === 'super_admin'): ?><a href="index.php?page=super_admin">Super Admin</a><?php endif; ?>
@@ -85,7 +107,7 @@ $topProducts = db()->query('SELECT product_name, SUM(qty) qty, SUM(unit_price * 
             <div class="grid-3">
                 <div class="stats">Active Products<b><?= $stats['active_products'] ?></b></div>
                 <div class="stats">Low Stock<b><?= $stats['low_stock'] ?></b></div>
-                <div class="stats">Points Issued<b><?= $stats['points'] ?></b></div>
+                <div class="stats">BV Points<b><?= $stats['bv'] ?></b></div>
             </div><br>
             <section class="panel">
                 <h2 class="section-title">Recent Orders</h2><br>
@@ -115,6 +137,7 @@ $topProducts = db()->query('SELECT product_name, SUM(qty) qty, SUM(unit_price * 
                     <div class="field"><label>Selling Price</label><input type="number" step="0.01" name="selling_price" value="<?= e($edit['selling_price'] ?? '0') ?>" required></div>
                     <div class="field"><label>Tax Percent</label><input type="number" step="0.01" name="tax_percent" value="<?= e($edit['tax_percent'] ?? '0') ?>"></div>
                     <div class="field"><label>Discount Points</label><input type="number" name="discount_points" value="<?= e($edit['discount_points'] ?? '0') ?>"></div>
+                    <div class="field"><label>BV Points</label><input type="number" name="bv_points" value="<?= e($edit['bv_points'] ?? '0') ?>"></div>
                     <div class="field"><label>Stock</label><input type="number" name="stock" value="<?= e($edit['stock'] ?? '0') ?>"></div>
                     <div class="field"><label>Type</label><select name="product_type"><option value="regular" <?= (($edit['product_type'] ?? '') === 'regular') ? 'selected' : '' ?>>Regular Product</option><option value="discount_points" <?= (($edit['product_type'] ?? '') === 'discount_points') ? 'selected' : '' ?>>Discount Points Product</option></select></div>
                     <div class="field full"><label>Description</label><textarea name="description"><?= e($edit['description'] ?? '') ?></textarea></div>
@@ -135,9 +158,9 @@ $topProducts = db()->query('SELECT product_name, SUM(qty) qty, SUM(unit_price * 
             <section class="panel">
                 <h2 class="section-title">Product List</h2><br>
                 <table class="table">
-                    <tr><th>ID</th><th>Product</th><th>Type</th><th>MRP</th><th>Price</th><th>Tax</th><th>Points</th><th>Stock</th><th>Action</th></tr>
+                    <tr><th>ID</th><th>Product</th><th>Type</th><th>MRP</th><th>Price</th><th>Tax</th><th>Points</th><th>BV</th><th>Stock</th><th>Action</th></tr>
                     <?php foreach ($products as $p): ?>
-                        <tr><td><?= (int)$p['id'] ?></td><td><?= e($p['name']) ?><br><span class="small"><?= e($p['category']) ?></span></td><td><?= e($p['product_type']) ?></td><td><?= money($p['mrp']) ?></td><td><?= money($p['selling_price']) ?></td><td><?= e($p['tax_percent']) ?>%</td><td><?= (int)$p['discount_points'] ?></td><td><?= (int)$p['stock'] ?></td><td><a class="see-all-btn" href="index.php?page=admin&module=products&edit=<?= (int)$p['id'] ?>">Edit</a> <a class="danger-link" href="index.php?action=delete_product&id=<?= (int)$p['id'] ?>">Disable</a></td></tr>
+                        <tr><td><?= (int)$p['id'] ?></td><td><?= e($p['name']) ?><br><span class="small"><?= e($p['category']) ?></span></td><td><?= e($p['product_type']) ?></td><td><?= money($p['mrp']) ?></td><td><?= money($p['selling_price']) ?></td><td><?= e($p['tax_percent']) ?>%</td><td><?= (int)$p['discount_points'] ?></td><td><?= (int)$p['bv_points'] ?></td><td><?= (int)$p['stock'] ?></td><td><a class="see-all-btn" href="index.php?page=admin&module=products&edit=<?= (int)$p['id'] ?>">Edit</a> <a class="danger-link" href="index.php?action=delete_product&id=<?= (int)$p['id'] ?>">Disable</a></td></tr>
                     <?php endforeach; ?>
                 </table>
             </section>
@@ -279,6 +302,98 @@ $topProducts = db()->query('SELECT product_name, SUM(qty) qty, SUM(unit_price * 
                             <td><?= e($o['shipping_address']) ?></td>
                         </tr>
                     <?php endforeach; ?>
+                </table>
+            </section>
+        <?php endif; ?>
+
+        <?php if ($module === 'bv'): ?>
+            <div class="grid-3">
+                <div class="stats">Total BV<b><?= $stats['bv'] ?></b></div>
+                <div class="stats">Distributors<b><?= count($distributors) ?></b></div>
+                <div class="stats">This Month<b><?= $stats['bv_month'] ?></b></div>
+            </div><br>
+            <section class="panel">
+                <h2 class="section-title">Monthly BV Share</h2>
+                <p class="section-kicker">Admin can decide monthly individual, team or group BV share for distributors.</p><br>
+                <form method="post" class="form-grid">
+                    <input type="hidden" name="action" value="add_monthly_bv_share">
+                    <div class="field"><label>Distributor</label><select name="distributor_id" required>
+                        <option value="">Select distributor</option>
+                        <?php foreach ($distributors as $d): ?>
+                            <option value="<?= (int)$d['id'] ?>"><?= e($d['name']) ?> - <?= e($d['distributor_uid']) ?></option>
+                        <?php endforeach; ?>
+                    </select></div>
+                    <div class="field"><label>Month</label><input type="month" name="share_month" value="<?= e(date('Y-m')) ?>" required></div>
+                    <div class="field"><label>Share Type</label><select name="share_type">
+                        <option value="individual">Individual Share</option>
+                        <option value="team">Team Share</option>
+                        <option value="group">Group Share</option>
+                        <option value="monthly_share">Monthly Share</option>
+                    </select></div>
+                    <div class="field"><label>BV Points</label><input type="number" min="1" name="points" required></div>
+                    <div class="field full"><label>Note</label><input name="note" placeholder="Optional note"></div>
+                    <button class="pill-btn full">Add BV Share</button>
+                </form>
+            </section><br>
+            <section class="panel">
+                <h2 class="section-title">Distributor Monthly BV Points</h2><br>
+                <table class="table">
+                    <tr><th>Distributor</th><th>Current PBV</th><th>Current GBV</th><th>Current TBV</th><th>Current Earnings</th><th>Previous PBV</th><th>Previous GBV</th><th>Previous TBV</th><th>Previous Earnings</th></tr>
+                    <?php foreach ($distributors as $d): ?>
+                        <?php $summary = distributor_monthly_bv_summary((int)$d['id']); ?>
+                        <tr>
+                            <td><?= e($d['name']) ?><br><span class="small"><?= e($d['distributor_uid']) ?></span></td>
+                            <td><?= $summary['current']['pbv'] ?></td>
+                            <td><?= $summary['current']['gbv'] ?></td>
+                            <td><a class="see-all-btn" href="index.php?page=admin&module=bv&bv_distributor=<?= (int)$d['id'] ?>&bv_month=<?= e($summary['current_month']) ?>"><?= $summary['current']['tbv'] ?></a></td>
+                            <td><?= money($summary['current']['earnings']) ?></td>
+                            <td><?= $summary['previous']['pbv'] ?></td>
+                            <td><?= $summary['previous']['gbv'] ?></td>
+                            <td><a class="see-all-btn" href="index.php?page=admin&module=bv&bv_distributor=<?= (int)$d['id'] ?>&bv_month=<?= e($summary['previous_month']) ?>"><?= $summary['previous']['tbv'] ?></a></td>
+                            <td><?= money($summary['previous']['earnings']) ?></td>
+                        </tr>
+                    <?php endforeach; ?>
+                    <?php if (!$distributors): ?><tr><td colspan="9">No distributors yet.</td></tr><?php endif; ?>
+                </table>
+            </section><br>
+            <?php if ($selectedBvDistributor): ?>
+                <section class="panel">
+                    <h2 class="section-title">Team BV Details - <?= e($selectedBvDistributor['name']) ?> / <?= e($selectedBvMonth) ?></h2>
+                    <p class="section-kicker">Direct member earned BV, group BV under that member, and total business for the selected month.</p><br>
+                    <table class="table">
+                        <tr><th>Direct Member</th><th>Earned BV</th><th>Group BV</th><th>Total BV</th><th>Role</th></tr>
+                        <?php foreach ($selectedBranchRows as $row): ?>
+                            <tr>
+                                <td><?= e($row['member']['name']) ?><br><span class="small"><?= e($row['member']['email']) ?></span></td>
+                                <td><?= (int)$row['pbv'] ?></td>
+                                <td><?= (int)$row['gbv'] ?></td>
+                                <td><?= (int)$row['tbv'] ?></td>
+                                <td><?= e($row['member']['role']) ?></td>
+                            </tr>
+                        <?php endforeach; ?>
+                        <?php if (!$selectedBranchRows): ?><tr><td colspan="5">No team BV found for this month.</td></tr><?php endif; ?>
+                    </table>
+                </section><br>
+            <?php endif; ?>
+            <section class="panel">
+                <h2 class="section-title">BV Ledger</h2><br>
+                <table class="table">
+                    <tr><th>Distributor</th><th>Type</th><th>Level</th><th>BV</th><th>Rate</th><th>Earning</th><th>Month</th><th>Source</th><th>Note</th><th>Date</th></tr>
+                    <?php foreach ($bvRows as $row): ?>
+                        <tr>
+                            <td><?= e($row['distributor_name']) ?><br><span class="small"><?= e($row['distributor_uid']) ?></span></td>
+                            <td><?= e(str_replace('_', ' ', $row['type'])) ?></td>
+                            <td><?= $row['level_no'] ? 'L' . (int)$row['level_no'] : '-' ?></td>
+                            <td><?= (int)$row['points'] ?></td>
+                            <td><?= $row['commission_percent'] !== null ? e(rtrim(rtrim((string)$row['commission_percent'], '0'), '.')) . '%' : '-' ?></td>
+                            <td><?= money((float)$row['commission_amount']) ?></td>
+                            <td><?= e($row['share_month']) ?></td>
+                            <td><?= e($row['source_name'] ?? 'Admin') ?></td>
+                            <td><?= e($row['note']) ?></td>
+                            <td><?= e($row['created_at']) ?></td>
+                        </tr>
+                    <?php endforeach; ?>
+                    <?php if (!$bvRows): ?><tr><td colspan="10">No BV transactions yet.</td></tr><?php endif; ?>
                 </table>
             </section>
         <?php endif; ?>

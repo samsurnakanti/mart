@@ -17,6 +17,7 @@ $orders = (int)db()->query('SELECT COUNT(*) FROM orders')->fetchColumn();
 $products = (int)db()->query('SELECT COUNT(*) FROM products')->fetchColumn();
 $wallet = (int)db()->query('SELECT COALESCE(SUM(wallet_points),0) FROM users')->fetchColumn();
 $admins = (int)db()->query("SELECT COUNT(*) FROM users WHERE role IN ('admin','super_admin')")->fetchColumn();
+$distributors = (int)db()->query("SELECT COUNT(*) FROM users WHERE role = 'distributor'")->fetchColumn();
 ?>
 <div class="admin-shell">
     <aside class="admin-sidebar super">
@@ -42,7 +43,7 @@ $admins = (int)db()->query("SELECT COUNT(*) FROM users WHERE role IN ('admin','s
         <?php if ($module === 'overview'): ?>
             <div class="grid-3">
                 <div class="stats">Users<b><?= count($users) ?></b></div>
-                <div class="stats">Admin Users<b><?= $admins ?></b></div>
+                <div class="stats">Distributors<b><?= $distributors ?></b></div>
                 <div class="stats">Wallet Points<b><?= $wallet ?></b></div>
             </div><br>
             <div class="grid-3">
@@ -61,7 +62,7 @@ $admins = (int)db()->query("SELECT COUNT(*) FROM users WHERE role IN ('admin','s
                     <div class="field"><label>Name</label><input name="name" value="<?= e($editUser['name'] ?? '') ?>" required></div>
                     <div class="field"><label>Email</label><input type="email" name="email" value="<?= e($editUser['email'] ?? '') ?>" required></div>
                     <div class="field"><label>Phone</label><input name="phone" value="<?= e($editUser['phone'] ?? '') ?>"></div>
-                    <div class="field"><label>Role</label><select name="role"><?php foreach (['user','admin','super_admin'] as $role): ?><option value="<?= e($role) ?>" <?= (($editUser['role'] ?? 'user') === $role) ? 'selected' : '' ?>><?= e($role) ?></option><?php endforeach; ?></select></div>
+                    <div class="field"><label>Role</label><select name="role"><?php foreach (['user','distributor','admin','super_admin'] as $role): ?><option value="<?= e($role) ?>" <?= (($editUser['role'] ?? 'user') === $role) ? 'selected' : '' ?>><?= e($role) ?></option><?php endforeach; ?></select></div>
                     <div class="field"><label>Wallet Points</label><input type="number" name="wallet_points" value="<?= e($editUser['wallet_points'] ?? 0) ?>"></div>
                     <div class="field"><label><?= $editUser ? 'Set New Password' : 'Password for New User' ?></label><input type="password" name="password"></div>
                     <button class="pill-btn full"><?= $editUser ? 'Update User' : 'Create User' ?></button>
