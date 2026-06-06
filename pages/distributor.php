@@ -1,7 +1,7 @@
 <?php
 $user = require_distributor();
 $section = $_GET['section'] ?? 'dashboard';
-$allowedSections = ['dashboard', 'welcome-letter', 'id-card', 'view-profile', 'update-profile', 'kyc', 'downline', 'genealogy', 'register-member', 'orders', 'bv', 'earnings'];
+$allowedSections = ['dashboard', 'welcome-letter', 'id-card', 'view-profile', 'update-profile', 'kyc', 'downline', 'genealogy', 'register-member', 'orders', 'order-history', 'bv', 'earnings'];
 if (!in_array($section, $allowedSections, true)) {
     $section = 'dashboard';
 }
@@ -28,6 +28,7 @@ $orders = db()->prepare('
 ');
 $orders->execute([$user['id']]);
 $ownOrders = $orders->fetchAll();
+$orderProducts = active_products_for_distributor_order();
 $refLink = 'index.php?page=signup&type=distributor&ref=' . urlencode((string)$user['distributor_uid']);
 $bvRows = distributor_bv_transactions((int)$user['id'], 50);
 $earningRows = array_values(array_filter($bvRows, fn($row) => (float)$row['commission_amount'] > 0));
@@ -56,7 +57,8 @@ $sectionTitles = [
     'downline' => 'Downline',
     'genealogy' => 'Genealogy',
     'register-member' => 'New Member Register',
-    'orders' => 'Orders',
+    'orders' => 'Place Order',
+    'order-history' => 'Order History',
     'bv' => 'BVs',
     'earnings' => 'Earnings',
 ];
@@ -77,7 +79,8 @@ $navGroups = [
         'register-member' => 'New Member Register',
     ],
     'Orders' => [
-        'orders' => 'Your Orders',
+        'orders' => 'Place Order',
+        'order-history' => 'Order History',
     ],
     'BVs and Earnings' => [
         'bv' => 'BV Ledger',
@@ -88,7 +91,7 @@ $openGroups = [
     'Dashboard' => in_array($section, ['dashboard', 'welcome-letter', 'id-card'], true),
     'Profile' => in_array($section, ['view-profile', 'update-profile', 'kyc'], true),
     'Team' => in_array($section, ['downline', 'genealogy', 'register-member'], true),
-    'Orders' => $section === 'orders',
+    'Orders' => in_array($section, ['orders', 'order-history'], true),
     'BVs and Earnings' => in_array($section, ['bv', 'earnings'], true),
 ];
 ?>
@@ -285,30 +288,71 @@ $openGroups = [
             </section>
         <?php endif; ?>
 
-        <?php if ($section === 'orders'): ?>
+        <?php if ($section === 'order-history'): ?>
             <section class="panel">
-                <h2 class="section-title">Your Orders</h2><br>
+                <h2 class="section-title">Order Request History</h2><br>
                 <table class="table">
-                    <tr><th>Order</th><th>Total</th><th>Reward Earned</th><th>Points Used</th><th>Status</th><th>Invoice</th><th>Date</th></tr>
+                    <tr><th>Order</th><th>Total</th><th>Status</th><th>Products</th><th>Invoice</th><th>Date</th></tr>
                     <?php foreach ($ownOrders as $o): ?>
                         <tr>
                             <td>#<?= (int)$o['id'] ?></td>
                             <td><?= money($o['grand_total']) ?></td>
-                            <td><?= (int)$o['points_earned'] ?></td>
-                            <td><?= (int)$o['points_used'] ?></td>
                             <td><?= e($o['status']) ?></td>
+                            <td><span class="small">Admin can view products in Orders.</span></td>
                             <td>
                                 <?php if ($o['status'] === 'Completed'): ?>
                                     <a class="see-all-btn" href="index.php?page=invoice&id=<?= (int)$o['id'] ?>">View</a>
                                     <a class="see-all-btn" href="index.php?action=download_invoice&id=<?= (int)$o['id'] ?>">Download</a>
                                 <?php else: ?>
-                                    <span class="small">After approval</span>
+                                    <span class="small">After admin approval</span>
                                 <?php endif; ?>
                             </td>
                             <td><?= e($o['created_at']) ?></td>
                         </tr>
                     <?php endforeach; ?>
-                    <?php if (!$ownOrders): ?><tr><td colspan="7">No orders yet.</td></tr><?php endif; ?>
+                    <?php if (!$ownOrders): ?><tr><td colspan="6">No order requests yet.</td></tr><?php endif; ?>
+                </table>
+            </section>
+        <?php endif; ?>
+
+        <?php if ($section === 'orders'): ?>
+            <section class="panel">
+                <h2 class="section-title">Distributor Product Order</h2>
+                <p class="section-kicker">Enter quantities beside products and submit one request to admin.</p><br>
+                <form method="post">
+                    <input type="hidden" name="action" value="submit_distributor_order">
+                    <table class="table">
+                        <tr><th>Product</th><th>Category</th><th>Price</th><th>Tax</th><th>BV</th><th>Stock</th><th>Quantity</th></tr>
+                        <?php foreach ($orderProducts as $p): ?>
+                            <tr>
+                                <td><?= e($p['name']) ?></td>
+                                <td><?= e($p['category']) ?></td>
+                                <td><?= money($p['selling_price']) ?></td>
+                                <td><?= e($p['tax_percent']) ?>%</td>
+                                <td><?= (int)$p['bv_points'] ?></td>
+                                <td><?= (int)$p['stock'] ?></td>
+                                <td><input style="width:90px" type="number" min="0" max="<?= (int)$p['stock'] ?>" name="qty[<?= (int)$p['id'] ?>]" value="0"></td>
+                            </tr>
+                        <?php endforeach; ?>
+                        <?php if (!$orderProducts): ?><tr><td colspan="7">No products available.</td></tr><?php endif; ?>
+                    </table><br>
+                    <div class="field full"><label>Delivery / Note</label><textarea name="shipping_address" placeholder="Optional delivery address or note for admin"></textarea></div><br>
+                    <button class="pill-btn">Submit Order Request</button>
+                </form>
+            </section><br>
+            <section class="panel">
+                <h2 class="section-title">Recent Requests</h2><br>
+                <table class="table">
+                    <tr><th>Order</th><th>Total</th><th>Status</th><th>Date</th></tr>
+                    <?php foreach ($ownOrders as $o): ?>
+                        <tr>
+                            <td>#<?= (int)$o['id'] ?></td>
+                            <td><?= money($o['grand_total']) ?></td>
+                            <td><?= e($o['status']) ?></td>
+                            <td><?= e($o['created_at']) ?></td>
+                        </tr>
+                    <?php endforeach; ?>
+                    <?php if (!$ownOrders): ?><tr><td colspan="4">No order requests yet.</td></tr><?php endif; ?>
                 </table>
             </section>
         <?php endif; ?>

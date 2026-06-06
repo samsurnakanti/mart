@@ -71,9 +71,9 @@ $distributors = (int)db()->query("SELECT COUNT(*) FROM users WHERE role = 'distr
             <section class="panel">
                 <h2 class="section-title">All Users</h2><br>
                 <table class="table">
-                    <tr><th>ID</th><th>Name</th><th>Email</th><th>Phone</th><th>Role</th><th>Wallet</th><th>Action</th></tr>
+                    <tr><th>ID</th><th>Distributor ID</th><th>Name</th><th>Email</th><th>Phone</th><th>Role</th><th>Wallet</th><th>Action</th></tr>
                     <?php foreach ($users as $u): ?>
-                        <tr><td><?= (int)$u['id'] ?></td><td><?= e($u['name']) ?></td><td><?= e($u['email']) ?></td><td><?= e($u['phone']) ?></td><td><span class="role-pill"><?= e($u['role']) ?></span></td><td><?= (int)$u['wallet_points'] ?></td><td><a class="see-all-btn" href="index.php?page=super_admin&edit_user=<?= (int)$u['id'] ?>">Edit</a></td></tr>
+                        <tr><td><?= (int)$u['id'] ?></td><td><?= e($u['distributor_uid'] ?: '-') ?></td><td><?= e($u['name']) ?></td><td><?= e($u['email']) ?></td><td><?= e($u['phone']) ?></td><td><span class="role-pill"><?= e($u['role']) ?></span></td><td><?= (int)$u['wallet_points'] ?></td><td><a class="see-all-btn" href="index.php?page=super_admin&edit_user=<?= (int)$u['id'] ?>">Edit</a></td></tr>
                     <?php endforeach; ?>
                 </table>
             </section>

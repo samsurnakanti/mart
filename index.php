@@ -106,6 +106,13 @@ try {
             redirect_to('super_admin');
         }
 
+        if ($action === 'create_distributor') {
+            require_admin();
+            $credentials = create_distributor_by_admin($_POST);
+            flash('ok', 'Distributor created. ID: ' . $credentials['distributor_uid'] . ' Password: ' . $credentials['password']);
+            redirect_to('admin&module=distributors');
+        }
+
         if ($action === 'complete_order') {
             require_admin();
             complete_order((int)($_POST['order_id'] ?? 0), (int)($_POST['points_to_allot'] ?? 0));
@@ -136,6 +143,12 @@ try {
             update_distributor_kyc($_POST, $_FILES);
             flash('ok', 'Distributor KYC submitted successfully.');
             redirect_to($_POST['back'] ?? 'profile&tab=kyc');
+        }
+
+        if ($action === 'submit_distributor_order') {
+            $orderId = submit_distributor_order($_POST);
+            flash('ok', "Distributor order request #$orderId sent to admin.");
+            redirect_to('distributor&section=order-history');
         }
 
         if ($action === 'change_own_password') {

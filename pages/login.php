@@ -4,7 +4,7 @@
         <h1 class="section-title"><?= $isDistributorLogin ? 'Distributor Login' : 'Login' ?></h1><br>
         <form method="post" class="form-grid">
             <input type="hidden" name="action" value="<?= $isDistributorLogin ? 'distributor_login' : 'login' ?>">
-            <div class="field full"><label>Mobile Number</label><input name="login" inputmode="tel" placeholder="Enter mobile number" required></div>
+            <div class="field full"><label><?= $isDistributorLogin ? 'Distributor ID / Mobile Number' : 'Mobile Number' ?></label><input name="login" inputmode="text" placeholder="<?= $isDistributorLogin ? 'Enter distributor ID or mobile number' : 'Enter mobile number' ?>" required></div>
             <div class="field full"><label>Password</label><input type="password" name="password" required></div>
             <button class="pill-btn full">Login</button>
         </form>

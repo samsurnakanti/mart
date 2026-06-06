@@ -118,11 +118,11 @@ function signup(array $data): void
 function login(string $login, string $password, ?string $requiredRole = null): void
 {
     $login = trim($login);
-    $stmt = db()->prepare('SELECT * FROM users WHERE phone = ? OR email = ?');
-    $stmt->execute([$login, strtolower($login)]);
+    $stmt = db()->prepare('SELECT * FROM users WHERE phone = ? OR email = ? OR distributor_uid = ?');
+    $stmt->execute([$login, strtolower($login), strtoupper($login)]);
     $user = $stmt->fetch();
     if (!$user || !password_verify($password, $user['password_hash'])) {
-        throw new RuntimeException('Invalid mobile number or password.');
+        throw new RuntimeException('Invalid login ID or password.');
     }
     if ($requiredRole !== null && $user['role'] !== $requiredRole) {
         throw new RuntimeException('Use the correct login for this account type.');
@@ -149,6 +149,7 @@ function assign_distributor_uid(int $userId): string
 
 function sponsor_id_from_ref(string $ref): ?int
 {
+    $ref = strtoupper($ref);
     if ($ref === '') {
         return null;
     }
@@ -353,6 +354,112 @@ function place_order(array $data): int
     sync_reward_wallet_points($pdo, (int)$user['id']);
     $pdo->commit();
     $_SESSION['cart'] = [];
+    return $orderId;
+}
+
+function active_products_for_distributor_order(): array
+{
+    return db()->query("
+        SELECT *
+        FROM products
+        WHERE is_active = 1
+        ORDER BY category, name
+    ")->fetchAll();
+}
+
+function submit_distributor_order(array $data): int
+{
+    $user = require_distributor();
+    $qtyRows = $data['qty'] ?? [];
+    if (!is_array($qtyRows)) {
+        throw new RuntimeException('Invalid order quantity data.');
+    }
+
+    $requested = [];
+    foreach ($qtyRows as $productId => $qty) {
+        $qty = (int)$qty;
+        if ($qty > 0) {
+            $requested[(int)$productId] = $qty;
+        }
+    }
+    if (!$requested) {
+        throw new RuntimeException('Enter quantity for at least one product.');
+    }
+
+    $ids = array_keys($requested);
+    $stmt = db()->prepare('SELECT * FROM products WHERE id IN (' . implode(',', array_fill(0, count($ids), '?')) . ') AND is_active = 1 ORDER BY category, name');
+    $stmt->execute($ids);
+    $products = $stmt->fetchAll();
+    if (count($products) !== count($requested)) {
+        throw new RuntimeException('One or more selected products are not available.');
+    }
+
+    $rows = [];
+    foreach ($products as $product) {
+        $qty = $requested[(int)$product['id']];
+        if ($qty > (int)$product['stock']) {
+            throw new RuntimeException($product['name'] . ' has only ' . (int)$product['stock'] . ' in stock.');
+        }
+        if ($qty <= 0) {
+            continue;
+        }
+        $lineTotal = (float)$product['selling_price'] * $qty;
+        $taxRate = (float)$product['tax_percent'];
+        $rows[] = [
+            'product' => $product,
+            'qty' => $qty,
+            'line_tax' => $taxRate > 0 ? $lineTotal * ($taxRate / (100 + $taxRate)) : 0.0,
+            'line_subtotal' => $taxRate > 0 ? $lineTotal - ($lineTotal * ($taxRate / (100 + $taxRate))) : $lineTotal,
+            'line_total' => $lineTotal,
+        ];
+    }
+    if (!$rows) {
+        throw new RuntimeException('Selected products are out of stock.');
+    }
+
+    $subtotal = array_sum(array_column($rows, 'line_subtotal'));
+    $tax = array_sum(array_column($rows, 'line_tax'));
+    $address = trim($data['shipping_address'] ?? '');
+    if ($address === '') {
+        $address = 'Distributor order request, Khammam';
+    } elseif (stripos($address, 'khammam') === false) {
+        $address .= ', Khammam';
+    }
+
+    $pdo = db();
+    $pdo->beginTransaction();
+    $order = $pdo->prepare('INSERT INTO orders (user_id,subtotal,tax_total,points_used,grand_total,points_earned,shipping_name,shipping_phone,shipping_address) VALUES (?,?,?,?,?,?,?,?,?)');
+    $order->execute([
+        $user['id'],
+        $subtotal,
+        $tax,
+        0,
+        $subtotal + $tax,
+        0,
+        $user['name'],
+        $user['phone'],
+        $address,
+    ]);
+    $orderId = (int)$pdo->lastInsertId();
+
+    $item = $pdo->prepare('INSERT INTO order_items (order_id,product_id,product_name,qty,unit_price,tax_amount,points_value,bv_points,product_type) VALUES (?,?,?,?,?,?,?,?,?)');
+    $stock = $pdo->prepare('UPDATE products SET stock = GREATEST(0, stock - ?) WHERE id = ?');
+    foreach ($rows as $row) {
+        $product = $row['product'];
+        $item->execute([
+            $orderId,
+            $product['id'],
+            $product['name'],
+            $row['qty'],
+            $product['selling_price'],
+            $row['line_tax'],
+            $product['discount_points'],
+            $product['bv_points'] ?? 0,
+            $product['product_type'],
+        ]);
+        $stock->execute([$row['qty'], $product['id']]);
+    }
+    $pdo->commit();
     return $orderId;
 }
 
@@ -618,6 +725,9 @@ function save_user(array $data): void
         }
         db()->prepare('UPDATE users SET name=?, email=?, phone=?, role=?, wallet_points=?, password_hash=? WHERE id=?')
             ->execute([trim($data['name'] ?? ''), strtolower(trim($data['email'] ?? '')), trim($data['phone'] ?? ''), $role, $points, password_hash($password, PASSWORD_DEFAULT), $id]);
+        if ($role === 'distributor') {
+            assign_distributor_uid($id);
+        }
         return;
     }
     db()->prepare('UPDATE users SET name=?, email=?, phone=?, role=?, wallet_points=? WHERE id=?')
@@ -625,6 +735,47 @@ function save_user(array $data): void
     if ($role === 'distributor') {
         assign_distributor_uid($id);
     }
+}
+
+function generated_account_password(int $length = 10): string
+{
+    $chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+    $password = '';
+    for ($i = 0; $i < $length; $i++) {
+        $password .= $chars[random_int(0, strlen($chars) - 1)];
+    }
+    return $password;
+}
+
+function create_distributor_by_admin(array $data): array
+{
+    require_admin();
+    $name = trim($data['name'] ?? '');
+    $email = strtolower(trim($data['email'] ?? ''));
+    $phone = trim($data['phone'] ?? '');
+    $sponsorId = sponsor_id_from_ref(trim($data['referral_id'] ?? ''));
+    $password = (string)($data['password'] ?? '');
+    if ($password === '') {
+        $password = generated_account_password();
+    }
+    if ($name === '' || !filter_var($email, FILTER_VALIDATE_EMAIL) || $phone === '') {
+        throw new RuntimeException('Enter distributor name, mobile number and valid email.');
+    }
+    if (strlen($password) < 6) {
+        throw new RuntimeException('Password must be at least 6 characters.');
+    }
+    $exists = db()->prepare('SELECT id FROM users WHERE email = ? OR phone = ? LIMIT 1');
+    $exists->execute([$email, $phone]);
+    if ($exists->fetch()) {
+        throw new RuntimeException('A user with this email or mobile number already exists.');
+    }
+    $stmt = db()->prepare('INSERT INTO users (name,email,phone,password_hash,role,sponsor_distributor_id,kyc_status) VALUES (?,?,?,?,?,?,?)');
+    $stmt->execute([$name, $email, $phone, password_hash($password, PASSWORD_DEFAULT), 'distributor', $sponsorId, 'not_submitted']);
+    $userId = (int)db()->lastInsertId();
+    return [
+        'distributor_uid' => assign_distributor_uid($userId),
+        'password' => $password,
+    ];
 }
 
 function distributor_team(int $distributorId): array

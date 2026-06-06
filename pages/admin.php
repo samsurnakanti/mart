@@ -1,7 +1,7 @@
 <?php
 $admin = require_admin();
 $module = $_GET['module'] ?? 'dashboard';
-$allowedModules = ['dashboard', 'sliders', 'categories', 'products', 'inventory', 'orders', 'bv', 'reports', 'settings'];
+$allowedModules = ['dashboard', 'sliders', 'categories', 'products', 'inventory', 'orders', 'distributors', 'bv', 'reports', 'settings'];
 if (!in_array($module, $allowedModules, true)) {
     $module = 'dashboard';
 }
@@ -82,6 +82,7 @@ $topProducts = db()->query('SELECT product_name, SUM(qty) qty, SUM(unit_price * 
         <a class="<?= $module === 'products' ? 'active' : '' ?>" href="index.php?page=admin&module=products">Products</a>
         <a class="<?= $module === 'inventory' ? 'active' : '' ?>" href="index.php?page=admin&module=inventory">Inventory</a>
         <a class="<?= $module === 'orders' ? 'active' : '' ?>" href="index.php?page=admin&module=orders">Orders</a>
+        <a class="<?= $module === 'distributors' ? 'active' : '' ?>" href="index.php?page=admin&module=distributors">Distributors</a>
         <a class="<?= $module === 'bv' ? 'active' : '' ?>" href="index.php?page=admin&module=bv">BV Share</a>
         <a class="<?= $module === 'reports' ? 'active' : '' ?>" href="index.php?page=admin&module=reports">Reports</a>
         <a class="<?= $module === 'settings' ? 'active' : '' ?>" href="index.php?page=admin&module=settings">Set Password</a>
@@ -95,7 +96,7 @@ $topProducts = db()->query('SELECT product_name, SUM(qty) qty, SUM(unit_price * 
                 <span><?= e($admin['role']) ?></span>
                 <h1><?= e(ucwords(str_replace('_', ' ', $module))) ?></h1>
             </div>
-            <a class="primary-cta" href="index.php?page=admin&module=products">Add Product</a>
+            <a class="primary-cta" href="index.php?page=admin&module=<?= $module === 'distributors' ? 'distributors' : 'products' ?>"><?= $module === 'distributors' ? 'Create Distributor' : 'Add Product' ?></a>
         </div>
 
         <?php if ($module === 'dashboard'): ?>
@@ -302,6 +303,54 @@ $topProducts = db()->query('SELECT product_name, SUM(qty) qty, SUM(unit_price * 
                             <td><?= e($o['shipping_address']) ?></td>
                         </tr>
                     <?php endforeach; ?>
+                </table>
+            </section>
+        <?php endif; ?>
+
+        <?php if ($module === 'distributors'): ?>
+            <div class="grid-3">
+                <div class="stats">Distributors<b><?= count($distributors) ?></b></div>
+                <div class="stats">KYC Submitted<b><?= (int)db()->query("SELECT COUNT(*) FROM users WHERE role = 'distributor' AND kyc_status = 'submitted'")->fetchColumn() ?></b></div>
+                <div class="stats">KYC Approved<b><?= (int)db()->query("SELECT COUNT(*) FROM users WHERE role = 'distributor' AND kyc_status = 'approved'")->fetchColumn() ?></b></div>
+            </div><br>
+            <section class="panel">
+                <h2 class="section-title">Create Distributor</h2>
+                <p class="section-kicker">Admin creates the account, distributor ID is generated automatically, and password is shown once after creation.</p><br>
+                <form method="post" class="form-grid">
+                    <input type="hidden" name="action" value="create_distributor">
+                    <div class="field"><label>Name</label><input name="name" required></div>
+                    <div class="field"><label>Mobile Number</label><input name="phone" inputmode="tel" required></div>
+                    <div class="field"><label>Email</label><input type="email" name="email" required></div>
+                    <div class="field"><label>Password</label><input type="text" name="password" placeholder="Leave blank for auto password"></div>
+                    <div class="field full"><label>Sponsor Distributor ID</label><input name="referral_id" placeholder="Optional"></div>
+                    <button class="pill-btn full">Create Distributor</button>
+                </form>
+            </section><br>
+            <section class="panel">
+                <h2 class="section-title">Distributor Accounts</h2><br>
+                <table class="table">
+                    <tr><th>Distributor ID</th><th>Name</th><th>Mobile</th><th>Email</th><th>Sponsor</th><th>KYC</th><th>Joined</th></tr>
+                    <?php foreach ($distributors as $d): ?>
+                        <?php
+                        $sponsorName = '-';
+                        if (!empty($d['sponsor_distributor_id'])) {
+                            $sponsorStmt = db()->prepare('SELECT name, distributor_uid FROM users WHERE id = ?');
+                            $sponsorStmt->execute([(int)$d['sponsor_distributor_id']]);
+                            $sponsor = $sponsorStmt->fetch();
+                            $sponsorName = $sponsor ? $sponsor['name'] . ' - ' . $sponsor['distributor_uid'] : '-';
+                        }
+                        ?>
+                        <tr>
+                            <td><b><?= e($d['distributor_uid']) ?></b></td>
+                            <td><?= e($d['name']) ?></td>
+                            <td><?= e($d['phone']) ?></td>
+                            <td><?= e($d['email']) ?></td>
+                            <td><?= e($sponsorName) ?></td>
+                            <td><?= e(ucwords(str_replace('_', ' ', $d['kyc_status']))) ?></td>
+                            <td><?= e($d['created_at']) ?></td>
+                        </tr>
+                    <?php endforeach; ?>
+                    <?php if (!$distributors): ?><tr><td colspan="7">No distributors yet.</td></tr><?php endif; ?>
                 </table>
             </section>
         <?php endif; ?>
