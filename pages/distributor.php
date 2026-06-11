@@ -151,8 +151,8 @@ $openGroups = [
                 </section>
                 <section class="panel distributor-overview-list">
                     <h2 class="section-title">Quick Overview</h2><br>
-                    <p><b>Current PBV</b><span><?= $bvSummary['current']['pbv'] ?></span></p>
-                    <p><b>Current GBV</b><span><?= $bvSummary['current']['gbv'] ?></span></p>
+                    <p><b>Current Self BV</b><span><?= $bvSummary['current']['pbv'] ?></span></p>
+                    <p><b>Current Group BV</b><span><?= $bvSummary['current']['gbv'] ?></span></p>
                     <p><b>Current Earnings</b><span><?= money($bvSummary['current']['earnings']) ?></span></p>
                     <p><b>Previous Earnings</b><span><?= money($bvSummary['previous']['earnings']) ?></span></p>
                 </section>
@@ -160,7 +160,7 @@ $openGroups = [
             <section class="panel">
                 <h2 class="section-title">Monthly BV Points</h2><br>
                 <table class="table">
-                    <tr><th>Month</th><th>PBV</th><th>GBV</th><th>TBV</th><th>Earnings</th><th>Details</th></tr>
+                    <tr><th>Month</th><th>Self BV</th><th>Group BV</th><th>Total BV</th><th>Earnings</th><th>Details</th></tr>
                     <tr><td>Current Month (<?= e($bvSummary['current_month']) ?>)</td><td><?= $bvSummary['current']['pbv'] ?></td><td><?= $bvSummary['current']['gbv'] ?></td><td><?= $bvSummary['current']['tbv'] ?></td><td><?= money($bvSummary['current']['earnings']) ?></td><td><a class="see-all-btn" href="index.php?page=distributor&section=bv&bv_month=<?= e($bvSummary['current_month']) ?>">Show</a></td></tr>
                     <tr><td>Previous Month (<?= e($bvSummary['previous_month']) ?>)</td><td><?= $bvSummary['previous']['pbv'] ?></td><td><?= $bvSummary['previous']['gbv'] ?></td><td><?= $bvSummary['previous']['tbv'] ?></td><td><?= money($bvSummary['previous']['earnings']) ?></td><td><a class="see-all-btn" href="index.php?page=distributor&section=bv&bv_month=<?= e($bvSummary['previous_month']) ?>">Show</a></td></tr>
                 </table>
@@ -363,6 +363,15 @@ $openGroups = [
                 <div class="stats">Previous Month BV<b><?= $bvSummary['previous']['tbv'] ?></b></div>
                 <div class="stats">Total BV<b><?= $bvTotal ?></b></div>
             </div><br>
+            <section class="panel">
+                <h2 class="section-title">Monthly BV Share</h2>
+                <p class="section-kicker">Your self BV, team/group BV, total BV and earnings for current and previous month.</p><br>
+                <table class="table">
+                    <tr><th>Month</th><th>Self BV</th><th>Group BV</th><th>Total BV</th><th>Earnings</th><th>Details</th></tr>
+                    <tr><td>Current Month (<?= e($bvSummary['current_month']) ?>)</td><td><?= $bvSummary['current']['pbv'] ?></td><td><?= $bvSummary['current']['gbv'] ?></td><td><?= $bvSummary['current']['tbv'] ?></td><td><?= money($bvSummary['current']['earnings']) ?></td><td><a class="see-all-btn" href="index.php?page=distributor&section=bv&bv_month=<?= e($bvSummary['current_month']) ?>">Show</a></td></tr>
+                    <tr><td>Previous Month (<?= e($bvSummary['previous_month']) ?>)</td><td><?= $bvSummary['previous']['pbv'] ?></td><td><?= $bvSummary['previous']['gbv'] ?></td><td><?= $bvSummary['previous']['tbv'] ?></td><td><?= money($bvSummary['previous']['earnings']) ?></td><td><a class="see-all-btn" href="index.php?page=distributor&section=bv&bv_month=<?= e($bvSummary['previous_month']) ?>">Show</a></td></tr>
+                </table>
+            </section><br>
             <section class="panel">
                 <h2 class="section-title">Team BV Details - <?= e($selectedBvMonth) ?></h2>
                 <p class="section-kicker">Direct member earned BV, group BV under that member, and total business for the selected month.</p><br>
