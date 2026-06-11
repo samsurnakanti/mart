@@ -29,10 +29,11 @@ $products = db()->query('SELECT * FROM products ORDER BY id DESC')->fetchAll();
 $categories = categories();
 $sliders = sliders();
 $distributors = db()->query("SELECT * FROM users WHERE role = 'distributor' ORDER BY name")->fetchAll();
+$bvUsers = db()->query("SELECT * FROM users WHERE role IN ('user','distributor') ORDER BY name")->fetchAll();
 $selectedBvDistributorId = (int)($_GET['bv_distributor'] ?? 0);
 $selectedBvMonth = valid_bv_month($_GET['bv_month'] ?? '', date('Y-m'));
 $selectedBvDistributor = null;
-foreach ($distributors as $d) {
+foreach ($bvUsers as $d) {
     if ((int)$d['id'] === $selectedBvDistributorId) {
         $selectedBvDistributor = $d;
         break;
@@ -40,7 +41,7 @@ foreach ($distributors as $d) {
 }
 $selectedBranchRows = $selectedBvDistributor ? distributor_branch_bv_rows($selectedBvDistributorId, $selectedBvMonth) : [];
 $bvRows = db()->query("
-    SELECT b.*, d.name AS distributor_name, d.distributor_uid, s.name AS source_name
+    SELECT b.*, d.name AS distributor_name, d.distributor_uid, d.role AS distributor_role, s.name AS source_name
     FROM bv_transactions b
     JOIN users d ON d.id = b.distributor_id
     LEFT JOIN users s ON s.id = b.source_user_id
@@ -358,18 +359,18 @@ $topProducts = db()->query('SELECT product_name, SUM(qty) qty, SUM(unit_price * 
         <?php if ($module === 'bv'): ?>
             <div class="grid-3">
                 <div class="stats">Total BV<b><?= $stats['bv'] ?></b></div>
-                <div class="stats">Distributors<b><?= count($distributors) ?></b></div>
+                <div class="stats">Users<b><?= count($bvUsers) ?></b></div>
                 <div class="stats">This Month<b><?= $stats['bv_month'] ?></b></div>
             </div><br>
             <section class="panel">
                 <h2 class="section-title">Monthly BV Share</h2>
-                <p class="section-kicker">Admin can decide monthly individual, team or group BV share for distributors.</p><br>
+                <p class="section-kicker">Admin can decide monthly individual, team or group BV share for users.</p><br>
                 <form method="post" class="form-grid">
                     <input type="hidden" name="action" value="add_monthly_bv_share">
-                    <div class="field"><label>Distributor</label><select name="distributor_id" required>
-                        <option value="">Select distributor</option>
-                        <?php foreach ($distributors as $d): ?>
-                            <option value="<?= (int)$d['id'] ?>"><?= e($d['name']) ?> - <?= e($d['distributor_uid']) ?></option>
+                    <div class="field"><label>User</label><select name="distributor_id" required>
+                        <option value="">Select user</option>
+                        <?php foreach ($bvUsers as $d): ?>
+                            <option value="<?= (int)$d['id'] ?>"><?= e($d['name']) ?><?= !empty($d['distributor_uid']) ? ' - ' . e($d['distributor_uid']) : '' ?> (<?= e($d['role']) ?>)</option>
                         <?php endforeach; ?>
                     </select></div>
                     <div class="field"><label>Month</label><input type="month" name="share_month" value="<?= e(date('Y-m')) ?>" required></div>
@@ -385,13 +386,13 @@ $topProducts = db()->query('SELECT product_name, SUM(qty) qty, SUM(unit_price * 
                 </form>
             </section><br>
             <section class="panel">
-                <h2 class="section-title">Distributor Monthly BV Points</h2><br>
+                <h2 class="section-title">User Monthly BV Points</h2><br>
                 <table class="table">
-                    <tr><th>Distributor</th><th>Current PBV</th><th>Current GBV</th><th>Current TBV</th><th>Current Earnings</th><th>Previous PBV</th><th>Previous GBV</th><th>Previous TBV</th><th>Previous Earnings</th></tr>
-                    <?php foreach ($distributors as $d): ?>
+                    <tr><th>User</th><th>Current Self BV</th><th>Current Group BV</th><th>Current Total BV</th><th>Current Earnings</th><th>Previous Self BV</th><th>Previous Group BV</th><th>Previous Total BV</th><th>Previous Earnings</th></tr>
+                    <?php foreach ($bvUsers as $d): ?>
                         <?php $summary = distributor_monthly_bv_summary((int)$d['id']); ?>
                         <tr>
-                            <td><?= e($d['name']) ?><br><span class="small"><?= e($d['distributor_uid']) ?></span></td>
+                            <td><?= e($d['name']) ?><br><span class="small"><?= !empty($d['distributor_uid']) ? e($d['distributor_uid']) . ' - ' : '' ?><?= e($d['role']) ?></span></td>
                             <td><?= $summary['current']['pbv'] ?></td>
                             <td><?= $summary['current']['gbv'] ?></td>
                             <td><a class="see-all-btn" href="index.php?page=admin&module=bv&bv_distributor=<?= (int)$d['id'] ?>&bv_month=<?= e($summary['current_month']) ?>"><?= $summary['current']['tbv'] ?></a></td>
@@ -402,12 +403,12 @@ $topProducts = db()->query('SELECT product_name, SUM(qty) qty, SUM(unit_price * 
                             <td><?= money($summary['previous']['earnings']) ?></td>
                         </tr>
                     <?php endforeach; ?>
-                    <?php if (!$distributors): ?><tr><td colspan="9">No distributors yet.</td></tr><?php endif; ?>
+                    <?php if (!$bvUsers): ?><tr><td colspan="9">No users yet.</td></tr><?php endif; ?>
                 </table>
             </section><br>
             <?php if ($selectedBvDistributor): ?>
                 <section class="panel">
-                    <h2 class="section-title">Team BV Details - <?= e($selectedBvDistributor['name']) ?> / <?= e($selectedBvMonth) ?></h2>
+                    <h2 class="section-title">Group BV Details - <?= e($selectedBvDistributor['name']) ?> / <?= e($selectedBvMonth) ?></h2>
                     <p class="section-kicker">Direct member earned BV, group BV under that member, and total business for the selected month.</p><br>
                     <table class="table">
                         <tr><th>Direct Member</th><th>Earned BV</th><th>Group BV</th><th>Total BV</th><th>Role</th></tr>
@@ -427,10 +428,10 @@ $topProducts = db()->query('SELECT product_name, SUM(qty) qty, SUM(unit_price * 
             <section class="panel">
                 <h2 class="section-title">BV Ledger</h2><br>
                 <table class="table">
-                    <tr><th>Distributor</th><th>Type</th><th>Level</th><th>BV</th><th>Rate</th><th>Earning</th><th>Month</th><th>Source</th><th>Note</th><th>Date</th></tr>
+                    <tr><th>User</th><th>Type</th><th>Level</th><th>BV</th><th>Rate</th><th>Earning</th><th>Month</th><th>Source</th><th>Note</th><th>Date</th></tr>
                     <?php foreach ($bvRows as $row): ?>
                         <tr>
-                            <td><?= e($row['distributor_name']) ?><br><span class="small"><?= e($row['distributor_uid']) ?></span></td>
+                            <td><?= e($row['distributor_name']) ?><br><span class="small"><?= !empty($row['distributor_uid']) ? e($row['distributor_uid']) . ' - ' : '' ?><?= e($row['distributor_role']) ?></span></td>
                             <td><?= e(str_replace('_', ' ', $row['type'])) ?></td>
                             <td><?= $row['level_no'] ? 'L' . (int)$row['level_no'] : '-' ?></td>
                             <td><?= (int)$row['points'] ?></td>

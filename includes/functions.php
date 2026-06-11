@@ -976,12 +976,12 @@ function add_monthly_bv_share(array $data): void
     $type = in_array($data['share_type'] ?? 'monthly_share', ['individual', 'team', 'group', 'monthly_share'], true) ? $data['share_type'] : 'monthly_share';
     $note = trim($data['note'] ?? '');
     if ($distributorId <= 0 || $points <= 0 || !preg_match('/^\d{4}-\d{2}$/', $month)) {
-        throw new RuntimeException('Select distributor, month and BV points.');
+        throw new RuntimeException('Select user, month and BV points.');
     }
-    $stmt = db()->prepare("SELECT id FROM users WHERE id = ? AND role = 'distributor'");
+    $stmt = db()->prepare("SELECT id FROM users WHERE id = ? AND role IN ('user','distributor')");
     $stmt->execute([$distributorId]);
     if (!$stmt->fetch()) {
-        throw new RuntimeException('Distributor not found.');
+        throw new RuntimeException('User not found.');
     }
     db()->prepare('INSERT INTO bv_transactions (distributor_id,points,type,share_month,note) VALUES (?,?,?,?,?)')
         ->execute([$distributorId, $points, $type, $month, $note !== '' ? $note : 'Monthly BV share by admin']);
@@ -1049,18 +1049,36 @@ function credit_order_bv(PDO $pdo, array $order): void
         if ($points <= 0) {
             continue;
         }
+        $commissionPointShares = bv_level_commission_points($points);
         if ($buyer['role'] === 'distributor') {
-            insert_bv_once($exists, $insert, (int)$buyer['id'], (int)$buyer['id'], (int)$order['id'], (int)$item['id'], $points, 0.0, null, null, 'self', 'Self purchase BV');
+            $selfPercent = bv_level_commission_rates()[1] ?? 18.0;
+            $selfCommission = round($points * ($selfPercent / 100), 2);
+            insert_bv_once(
+                $exists,
+                $insert,
+                (int)$buyer['id'],
+                (int)$buyer['id'],
+                (int)$order['id'],
+                (int)$item['id'],
+                $points,
+                $selfCommission,
+                $selfPercent,
+                1,
+                'self',
+                'Level 1 self commission from ' . $points . ' BV at ' . rtrim(rtrim((string)$selfPercent, '0'), '.') . '%'
+            );
         }
         $uplineId = (int)($buyer['sponsor_distributor_id'] ?? 0);
-        $commissionPointShares = bv_level_commission_points($points);
         foreach (bv_level_commission_rates() as $level => $percent) {
+            if ($level === 1) {
+                continue;
+            }
             if ($uplineId <= 0) {
                 break;
             }
             $commission = round($points * ($percent / 100), 2);
             $commissionPoints = $commissionPointShares[$level] ?? 0;
-            $type = $level === 1 ? 'direct_downline' : 'team';
+            $type = $level === 2 ? 'direct_downline' : 'team';
             insert_bv_once(
                 $exists,
                 $insert,
