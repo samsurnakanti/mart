@@ -94,25 +94,192 @@ function require_distributor(): array
     return $user;
 }
 
-function signup(array $data): void
+function normalize_whatsapp_phone(string $phone): string
+{
+    $phone = trim($phone);
+    if ($phone === '') {
+        throw new RuntimeException('Enter a valid mobile number.');
+    }
+    $digits = preg_replace('/\D+/', '', $phone) ?? '';
+    if (strlen($digits) === 10) {
+        return '+91' . $digits;
+    }
+    if (strlen($digits) === 12 && str_starts_with($digits, '91')) {
+        return '+' . $digits;
+    }
+    if (str_starts_with($phone, '+') && strlen($digits) >= 10) {
+        return '+' . $digits;
+    }
+    throw new RuntimeException('Enter a valid WhatsApp mobile number.');
+}
+
+function make_otp(): string
+{
+    return (string)random_int(100000, 999999);
+}
+
+function send_whatsapp_otp(string $phone, string $otp): void
+{
+    if (ARKLYTICS_WHATSAPP_API_KEY === '') {
+        throw new RuntimeException('WhatsApp API key is not configured.');
+    }
+
+    $payload = json_encode([
+        'kind' => 'authentication',
+        'template_name' => 'login_otp',
+        'language' => 'en_US',
+        'to' => normalize_whatsapp_phone($phone),
+        'otp' => $otp,
+    ], JSON_THROW_ON_ERROR);
+    $headers = [
+        'Authorization: Bearer ' . ARKLYTICS_WHATSAPP_API_KEY,
+        'Content-Type: application/json',
+    ];
+
+    if (function_exists('curl_init')) {
+        $ch = curl_init(ARKLYTICS_WHATSAPP_ENDPOINT);
+        curl_setopt_array($ch, [
+            CURLOPT_POST => true,
+            CURLOPT_HTTPHEADER => $headers,
+            CURLOPT_POSTFIELDS => $payload,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => 20,
+        ]);
+        $body = curl_exec($ch);
+        $status = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $error = curl_error($ch);
+        curl_close($ch);
+        if ($body === false || $status < 200 || $status >= 300) {
+            throw new RuntimeException('Could not send WhatsApp OTP. ' . ($error ?: 'Please try again.'));
+        }
+        return;
+    }
+
+    $context = stream_context_create([
+        'http' => [
+            'method' => 'POST',
+            'header' => implode("\r\n", $headers),
+            'content' => $payload,
+            'timeout' => 20,
+            'ignore_errors' => true,
+        ],
+    ]);
+    $body = file_get_contents(ARKLYTICS_WHATSAPP_ENDPOINT, false, $context);
+    $statusLine = $http_response_header[0] ?? '';
+    if ($body === false || !preg_match('/\s2\d\d\s/', $statusLine)) {
+        throw new RuntimeException('Could not send WhatsApp OTP. Please try again.');
+    }
+}
+
+function request_signup_otp(array $data): void
 {
     $name = trim($data['name'] ?? '');
     $email = strtolower(trim($data['email'] ?? ''));
     $phone = trim($data['phone'] ?? '');
     $password = (string)($data['password'] ?? '');
     $role = ($data['account_type'] ?? 'user') === 'distributor' ? 'distributor' : 'user';
-    $sponsorId = sponsor_id_from_ref(trim($data['referral_id'] ?? ''));
+    $referralId = trim($data['referral_id'] ?? '');
     if ($name === '' || !filter_var($email, FILTER_VALIDATE_EMAIL) || strlen($password) < 6) {
         throw new RuntimeException('Enter name, valid email, and 6 character password.');
     }
+    normalize_whatsapp_phone($phone);
+    sponsor_id_from_ref($referralId);
+
+    $exists = db()->prepare('SELECT id FROM users WHERE email = ? LIMIT 1');
+    $exists->execute([$email]);
+    if ($exists->fetchColumn()) {
+        throw new RuntimeException('This email is already registered.');
+    }
+
+    $otp = make_otp();
+    $_SESSION['pending_signup'] = [
+        'data' => [
+            'name' => $name,
+            'email' => $email,
+            'phone' => $phone,
+            'password_hash' => password_hash($password, PASSWORD_DEFAULT),
+            'account_type' => $role,
+            'referral_id' => $referralId,
+        ],
+        'otp_hash' => password_hash($otp, PASSWORD_DEFAULT),
+        'expires_at' => time() + 600,
+    ];
+    send_whatsapp_otp($phone, $otp);
+    flash('ok', 'OTP sent on WhatsApp. Enter it to complete signup.');
+}
+
+function signup(array $data): void
+{
+    $pending = $_SESSION['pending_signup'] ?? null;
+    if (!$pending || empty($pending['data']) || empty($pending['otp_hash']) || (int)($pending['expires_at'] ?? 0) < time()) {
+        unset($_SESSION['pending_signup']);
+        throw new RuntimeException('Signup OTP expired. Please request a new OTP.');
+    }
+    $otp = trim($data['otp'] ?? '');
+    if (!password_verify($otp, (string)$pending['otp_hash'])) {
+        throw new RuntimeException('Invalid OTP.');
+    }
+
+    $signupData = $pending['data'];
+    $name = trim($signupData['name'] ?? '');
+    $email = strtolower(trim($signupData['email'] ?? ''));
+    $phone = trim($signupData['phone'] ?? '');
+    $passwordHash = (string)($signupData['password_hash'] ?? '');
+    $role = ($signupData['account_type'] ?? 'user') === 'distributor' ? 'distributor' : 'user';
+    $sponsorId = sponsor_id_from_ref(trim($signupData['referral_id'] ?? ''));
+    if ($name === '' || !filter_var($email, FILTER_VALIDATE_EMAIL) || $passwordHash === '') {
+        throw new RuntimeException('Enter name, valid email, and 6 character password.');
+    }
     $stmt = db()->prepare('INSERT INTO users (name,email,phone,password_hash,role,sponsor_distributor_id) VALUES (?,?,?,?,?,?)');
-    $stmt->execute([$name, $email, $phone, password_hash($password, PASSWORD_DEFAULT), $role, $sponsorId]);
+    $stmt->execute([$name, $email, $phone, $passwordHash, $role, $sponsorId]);
     $userId = (int)db()->lastInsertId();
     if ($role === 'distributor') {
         assign_distributor_uid($userId);
     }
+    unset($_SESSION['pending_signup']);
     $_SESSION['user_id'] = $userId;
     flash('ok', 'Welcome to VMCmarts.');
+}
+
+function request_password_reset_otp(array $data): void
+{
+    $login = trim($data['login'] ?? '');
+    $stmt = db()->prepare('SELECT id, phone FROM users WHERE phone = ? OR email = ? OR distributor_uid = ? LIMIT 1');
+    $stmt->execute([$login, strtolower($login), strtoupper($login)]);
+    $user = $stmt->fetch();
+    if (!$user || trim((string)$user['phone']) === '') {
+        throw new RuntimeException('No account with WhatsApp mobile number was found.');
+    }
+
+    $otp = make_otp();
+    $_SESSION['password_reset'] = [
+        'user_id' => (int)$user['id'],
+        'otp_hash' => password_hash($otp, PASSWORD_DEFAULT),
+        'expires_at' => time() + 600,
+    ];
+    send_whatsapp_otp((string)$user['phone'], $otp);
+    flash('ok', 'OTP sent on WhatsApp. Enter it with your new password.');
+}
+
+function reset_password_with_otp(array $data): void
+{
+    $pending = $_SESSION['password_reset'] ?? null;
+    if (!$pending || (int)($pending['expires_at'] ?? 0) < time()) {
+        unset($_SESSION['password_reset']);
+        throw new RuntimeException('Password reset OTP expired. Please request a new OTP.');
+    }
+    $otp = trim($data['otp'] ?? '');
+    $password = (string)($data['password'] ?? '');
+    if (!password_verify($otp, (string)$pending['otp_hash'])) {
+        throw new RuntimeException('Invalid OTP.');
+    }
+    if (strlen($password) < 6) {
+        throw new RuntimeException('New password must be at least 6 characters.');
+    }
+    db()->prepare('UPDATE users SET password_hash = ? WHERE id = ?')
+        ->execute([password_hash($password, PASSWORD_DEFAULT), (int)$pending['user_id']]);
+    unset($_SESSION['password_reset']);
+    flash('ok', 'Password updated. You can login now.');
 }
 
 function login(string $login, string $password, ?string $requiredRole = null): void

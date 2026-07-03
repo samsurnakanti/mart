@@ -34,9 +34,24 @@ $action = $_POST['action'] ?? $_GET['action'] ?? '';
 
 try {
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        if ($action === 'request_signup_otp') {
+            request_signup_otp($_POST);
+            redirect_to('signup&verify=1');
+        }
+
         if ($action === 'signup') {
             signup($_POST);
             redirect_to('');
+        }
+
+        if ($action === 'request_password_reset_otp') {
+            request_password_reset_otp($_POST);
+            redirect_to('forgot_password&verify=1');
+        }
+
+        if ($action === 'reset_password') {
+            reset_password_with_otp($_POST);
+            redirect_to('login');
         }
 
         if ($action === 'login') {
@@ -215,7 +230,7 @@ try {
 }
 
 $page = $_GET['page'] ?? 'home';
-$allowed = ['home', 'products', 'product', 'login', 'signup', 'cart', 'checkout', 'profile', 'invoice', 'admin', 'super_admin', 'distributor'];
+$allowed = ['home', 'products', 'product', 'login', 'signup', 'forgot_password', 'cart', 'checkout', 'profile', 'invoice', 'admin', 'super_admin', 'distributor'];
 if (!in_array($page, $allowed, true)) {
     $page = 'home';
 }

@@ -9,6 +9,7 @@
             <button class="pill-btn full">Login</button>
         </form>
         <p class="small" style="margin-top:12px">Don't have an account? <a href="index.php?page=signup<?= $isDistributorLogin ? '&type=distributor' : '' ?>">Create account / Signup now</a></p>
+        <p class="small" style="margin-top:8px"><a href="index.php?page=forgot_password">Forgot password?</a></p>
         <p class="small" style="margin-top:8px">
             <?php if ($isDistributorLogin): ?>
                 <a href="index.php?page=login">Customer login</a>

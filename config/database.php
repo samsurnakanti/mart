@@ -6,6 +6,8 @@ const DB_PORT = '3307';
 const DB_USER = 'root';
 const DB_PASS = '';
 const DB_NAME = 'vmcmarts';
+const ARKLYTICS_WHATSAPP_ENDPOINT = 'https://connect.arklytics.in/api/whatsapp/send';
+const ARKLYTICS_WHATSAPP_API_KEY = 'wpi_live_84ced5a36cd3ab91ee6ac77af88dc90781f075d413a78736';
 
 function db(): PDO
 {
