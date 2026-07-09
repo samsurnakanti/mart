@@ -60,6 +60,9 @@ try {
             if ($user && in_array($user['role'], ['admin', 'super_admin'], true)) {
                 redirect_to('admin');
             }
+            if ($user && $user['role'] === 'stock_pointer') {
+                redirect_to('stock_pointer');
+            }
             redirect_to($user && $user['role'] === 'distributor' ? 'distributor' : '');
         }
 
@@ -112,6 +115,18 @@ try {
             update_inventory($_POST['stock'] ?? []);
             flash('ok', 'Inventory updated.');
             redirect_to('admin&module=inventory');
+        }
+
+        if ($action === 'allocate_stock_to_pointer') {
+            allocate_stock_to_pointer($_POST);
+            flash('ok', 'Stock allocated to stock pointer.');
+            redirect_to('super_admin&module=stock_pointers');
+        }
+
+        if ($action === 'submit_stock_pointer_pos_sale') {
+            $saleId = submit_stock_pointer_pos_sale($_POST);
+            flash('ok', "POS sale #$saleId completed.");
+            redirect_to('stock_pointer&section=sales');
         }
 
         if ($action === 'save_user') {
@@ -230,7 +245,7 @@ try {
 }
 
 $page = $_GET['page'] ?? 'home';
-$allowed = ['home', 'products', 'product', 'login', 'signup', 'forgot_password', 'cart', 'checkout', 'profile', 'invoice', 'admin', 'super_admin', 'distributor'];
+$allowed = ['home', 'products', 'product', 'login', 'signup', 'forgot_password', 'cart', 'checkout', 'profile', 'invoice', 'admin', 'super_admin', 'distributor', 'stock_pointer'];
 if (!in_array($page, $allowed, true)) {
     $page = 'home';
 }

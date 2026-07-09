@@ -54,6 +54,7 @@ $activePage = $_GET['page'] ?? 'home';
         <?php if (!$user): ?><a href="index.php?page=signup">Create Account</a><?php endif; ?>
         <?php if (!$user): ?><a href="index.php?page=login&type=distributor">Distributor Login</a><?php endif; ?>
         <?php if ($user && $user['role'] === 'distributor'): ?><a href="index.php?page=distributor">Distributor</a><?php endif; ?>
+        <?php if ($user && $user['role'] === 'stock_pointer'): ?><a href="index.php?page=stock_pointer">POS</a><?php endif; ?>
         <?php if ($user && in_array($user['role'], ['admin', 'super_admin'], true)): ?><a href="index.php?page=admin">Admin</a><?php endif; ?>
     </div>
 </header>
@@ -70,6 +71,7 @@ $activePage = $_GET['page'] ?? 'home';
             <?php if ($user): ?>
                 <a class="nav-btn" href="index.php?page=profile">Wallet <span class="badge"><?= (int)$user['wallet_points'] ?></span></a>
                 <?php if ($user['role'] === 'distributor'): ?><a class="nav-btn" href="index.php?page=distributor">Distributor</a><?php endif; ?>
+                <?php if ($user['role'] === 'stock_pointer'): ?><a class="nav-btn" href="index.php?page=stock_pointer">POS</a><?php endif; ?>
                 <?php if (in_array($user['role'], ['admin', 'super_admin'], true)): ?><a class="nav-btn" href="index.php?page=admin">Admin</a><?php endif; ?>
                 <?php if ($user['role'] === 'super_admin'): ?><a class="nav-btn" href="index.php?page=super_admin">Super Admin</a><?php endif; ?>
                 <a class="nav-btn" href="index.php?action=logout">Logout</a>
@@ -90,6 +92,7 @@ $activePage = $_GET['page'] ?? 'home';
         <?php endforeach; ?>
         <a href="index.php?page=profile" class="rail-link rail-wallet">My Wallet</a>
         <?php if ($user && $user['role'] === 'distributor'): ?><a href="index.php?page=distributor" class="rail-link">Distributor Dashboard</a><?php endif; ?>
+        <?php if ($user && $user['role'] === 'stock_pointer'): ?><a href="index.php?page=stock_pointer" class="rail-link">Stock Pointer POS</a><?php endif; ?>
     </div>
 </div>
 <?php if ($messages = flashes()): ?>

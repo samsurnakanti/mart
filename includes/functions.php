@@ -94,6 +94,15 @@ function require_distributor(): array
     return $user;
 }
 
+function require_stock_pointer(): array
+{
+    $user = require_login();
+    if ($user['role'] !== 'stock_pointer') {
+        throw new RuntimeException('Stock pointer access required.');
+    }
+    return $user;
+}
+
 function normalize_whatsapp_phone(string $phone): string
 {
     $phone = trim($phone);
@@ -534,6 +543,205 @@ function active_products_for_distributor_order(): array
     ")->fetchAll();
 }
 
+function stock_pointer_users(): array
+{
+    return db()->query("SELECT * FROM users WHERE role = 'stock_pointer' ORDER BY name")->fetchAll();
+}
+
+function allocate_stock_to_pointer(array $data): void
+{
+    $admin = require_super_admin();
+    $stockPointerId = (int)($data['stock_pointer_id'] ?? 0);
+    $productId = (int)($data['product_id'] ?? 0);
+    $qty = max(0, (int)($data['qty'] ?? 0));
+    $note = trim($data['note'] ?? '');
+    if ($stockPointerId <= 0 || $productId <= 0 || $qty <= 0) {
+        throw new RuntimeException('Select stock pointer, product and quantity.');
+    }
+
+    $pdo = db();
+    $pdo->beginTransaction();
+    $userStmt = $pdo->prepare("SELECT id FROM users WHERE id = ? AND role = 'stock_pointer' LIMIT 1");
+    $userStmt->execute([$stockPointerId]);
+    if (!$userStmt->fetch()) {
+        throw new RuntimeException('Stock pointer account was not found.');
+    }
+
+    $productStmt = $pdo->prepare('SELECT id, stock, name FROM products WHERE id = ? AND is_active = 1 FOR UPDATE');
+    $productStmt->execute([$productId]);
+    $product = $productStmt->fetch();
+    if (!$product) {
+        throw new RuntimeException('Product was not found.');
+    }
+    if ($qty > (int)$product['stock']) {
+        throw new RuntimeException($product['name'] . ' has only ' . (int)$product['stock'] . ' in central stock.');
+    }
+
+    $pdo->prepare('UPDATE products SET stock = stock - ? WHERE id = ?')->execute([$qty, $productId]);
+    $pdo->prepare('
+        INSERT INTO stock_pointer_inventory (stock_pointer_id, product_id, qty)
+        VALUES (?,?,?)
+        ON DUPLICATE KEY UPDATE qty = qty + VALUES(qty)
+    ')->execute([$stockPointerId, $productId, $qty]);
+    $pdo->prepare('INSERT INTO stock_pointer_transfers (stock_pointer_id,product_id,qty,created_by,note) VALUES (?,?,?,?,?)')
+        ->execute([$stockPointerId, $productId, $qty, $admin['id'], $note]);
+    $pdo->commit();
+}
+
+function stock_pointer_inventory(int $stockPointerId): array
+{
+    $stmt = db()->prepare('
+        SELECT spi.*, p.name, p.category, p.selling_price, p.tax_percent, p.product_type, p.is_active
+        FROM stock_pointer_inventory spi
+        JOIN products p ON p.id = spi.product_id
+        WHERE spi.stock_pointer_id = ?
+        ORDER BY p.category, p.name
+    ');
+    $stmt->execute([$stockPointerId]);
+    return $stmt->fetchAll();
+}
+
+function stock_pointer_transfer_history(int $stockPointerId = 0, int $limit = 80): array
+{
+    $sql = '
+        SELECT spt.*, sp.name AS stock_pointer_name, p.name AS product_name, u.name AS admin_name
+        FROM stock_pointer_transfers spt
+        JOIN users sp ON sp.id = spt.stock_pointer_id
+        JOIN products p ON p.id = spt.product_id
+        JOIN users u ON u.id = spt.created_by
+    ';
+    $params = [];
+    if ($stockPointerId > 0) {
+        $sql .= ' WHERE spt.stock_pointer_id = ?';
+        $params[] = $stockPointerId;
+    }
+    $sql .= ' ORDER BY spt.id DESC LIMIT ' . max(1, $limit);
+    $stmt = db()->prepare($sql);
+    $stmt->execute($params);
+    return $stmt->fetchAll();
+}
+
+function pos_buyers(string $type): array
+{
+    $role = $type === 'distributor' ? 'distributor' : 'user';
+    $stmt = db()->prepare('SELECT id, name, phone, email, distributor_uid FROM users WHERE role = ? ORDER BY name');
+    $stmt->execute([$role]);
+    return $stmt->fetchAll();
+}
+
+function stock_pointer_sales(int $stockPointerId, int $limit = 50): array
+{
+    $stmt = db()->prepare('SELECT * FROM pos_sales WHERE stock_pointer_id = ? ORDER BY id DESC LIMIT ' . max(1, $limit));
+    $stmt->execute([$stockPointerId]);
+    return $stmt->fetchAll();
+}
+
+function submit_stock_pointer_pos_sale(array $data): int
+{
+    $stockPointer = require_stock_pointer();
+    $qtyRows = $data['qty'] ?? [];
+    if (!is_array($qtyRows)) {
+        throw new RuntimeException('Invalid POS quantity data.');
+    }
+
+    $requested = [];
+    foreach ($qtyRows as $productId => $qty) {
+        $qty = (int)$qty;
+        if ($qty > 0) {
+            $requested[(int)$productId] = $qty;
+        }
+    }
+    if (!$requested) {
+        throw new RuntimeException('Enter quantity for at least one POS item.');
+    }
+
+    $customerType = ($data['customer_type'] ?? 'customer') === 'distributor' ? 'distributor' : 'customer';
+    $buyerUserId = max(0, (int)($data['buyer_user_id'] ?? 0));
+    $buyerName = trim($data['buyer_name'] ?? '');
+    $buyerPhone = trim($data['buyer_phone'] ?? '');
+    if ($buyerUserId > 0) {
+        $buyerStmt = db()->prepare("SELECT * FROM users WHERE id = ? AND role IN ('user','distributor') LIMIT 1");
+        $buyerStmt->execute([$buyerUserId]);
+        $buyer = $buyerStmt->fetch();
+        if (!$buyer) {
+            throw new RuntimeException('Selected buyer was not found.');
+        }
+        $customerType = $buyer['role'] === 'distributor' ? 'distributor' : 'customer';
+        $buyerName = $buyer['name'];
+        $buyerPhone = $buyer['phone'];
+    }
+    if ($buyerName === '') {
+        throw new RuntimeException('Enter buyer name or select a registered buyer.');
+    }
+
+    $pdo = db();
+    $pdo->beginTransaction();
+    $ids = array_keys($requested);
+    $stmt = $pdo->prepare('
+        SELECT spi.product_id, spi.qty AS pointer_qty, p.*
+        FROM stock_pointer_inventory spi
+        JOIN products p ON p.id = spi.product_id
+        WHERE spi.stock_pointer_id = ? AND spi.product_id IN (' . implode(',', array_fill(0, count($ids), '?')) . ') AND p.is_active = 1
+        FOR UPDATE
+    ');
+    $stmt->execute(array_merge([(int)$stockPointer['id']], $ids));
+    $products = $stmt->fetchAll();
+    if (count($products) !== count($requested)) {
+        throw new RuntimeException('One or more selected products are not in your stock pointer inventory.');
+    }
+
+    $rows = [];
+    foreach ($products as $product) {
+        $qty = $requested[(int)$product['product_id']];
+        if ($qty > (int)$product['pointer_qty']) {
+            throw new RuntimeException($product['name'] . ' has only ' . (int)$product['pointer_qty'] . ' in your stock.');
+        }
+        $lineTotal = (float)$product['selling_price'] * $qty;
+        $taxRate = (float)$product['tax_percent'];
+        $lineTax = $taxRate > 0 ? $lineTotal * ($taxRate / (100 + $taxRate)) : 0.0;
+        $rows[] = [
+            'product' => $product,
+            'qty' => $qty,
+            'line_tax' => $lineTax,
+            'line_subtotal' => $lineTotal - $lineTax,
+            'line_total' => $lineTotal,
+        ];
+    }
+
+    $subtotal = array_sum(array_column($rows, 'line_subtotal'));
+    $tax = array_sum(array_column($rows, 'line_tax'));
+    $sale = $pdo->prepare('INSERT INTO pos_sales (stock_pointer_id,buyer_user_id,customer_type,buyer_name,buyer_phone,subtotal,tax_total,grand_total) VALUES (?,?,?,?,?,?,?,?)');
+    $sale->execute([
+        $stockPointer['id'],
+        $buyerUserId > 0 ? $buyerUserId : null,
+        $customerType,
+        $buyerName,
+        $buyerPhone,
+        $subtotal,
+        $tax,
+        $subtotal + $tax,
+    ]);
+    $saleId = (int)$pdo->lastInsertId();
+
+    $item = $pdo->prepare('INSERT INTO pos_sale_items (sale_id,product_id,product_name,qty,unit_price,tax_amount,product_type) VALUES (?,?,?,?,?,?,?)');
+    $stock = $pdo->prepare('UPDATE stock_pointer_inventory SET qty = qty - ? WHERE stock_pointer_id = ? AND product_id = ?');
+    foreach ($rows as $row) {
+        $product = $row['product'];
+        $item->execute([
+            $saleId,
+            $product['product_id'],
+            $product['name'],
+            $row['qty'],
+            $product['selling_price'],
+            $row['line_tax'],
+            $product['product_type'],
+        ]);
+        $stock->execute([$row['qty'], $stockPointer['id'], $product['product_id']]);
+    }
+    $pdo->commit();
+    return $saleId;
+}
+
 function submit_distributor_order(array $data): int
 {
     $user = require_distributor();
@@ -871,7 +1079,7 @@ function update_inventory(array $stockRows): void
 function save_user(array $data): void
 {
     $id = (int)($data['id'] ?? 0);
-    $role = in_array($data['role'] ?? 'user', ['user', 'distributor', 'admin', 'super_admin'], true) ? $data['role'] : 'user';
+    $role = in_array($data['role'] ?? 'user', ['user', 'distributor', 'stock_pointer', 'admin', 'super_admin'], true) ? $data['role'] : 'user';
     $points = max(0, (int)($data['wallet_points'] ?? 0));
     if ($id <= 0) {
         $password = (string)($data['password'] ?? '');

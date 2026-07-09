@@ -40,14 +40,14 @@ function migrate(PDO $pdo): void
             email VARCHAR(160) NOT NULL UNIQUE,
             phone VARCHAR(30) DEFAULT NULL,
             password_hash VARCHAR(255) NOT NULL,
-            role ENUM('user','distributor','admin','super_admin') NOT NULL DEFAULT 'user',
+            role ENUM('user','distributor','stock_pointer','admin','super_admin') NOT NULL DEFAULT 'user',
             wallet_points INT NOT NULL DEFAULT 0,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     ");
 
     try {
-        $pdo->exec("ALTER TABLE users MODIFY role ENUM('user','distributor','admin','super_admin') NOT NULL DEFAULT 'user'");
+        $pdo->exec("ALTER TABLE users MODIFY role ENUM('user','distributor','stock_pointer','admin','super_admin') NOT NULL DEFAULT 'user'");
     } catch (Throwable $ignored) {
     }
     foreach ([
@@ -227,6 +227,66 @@ function migrate(PDO $pdo): void
             note VARCHAR(255) NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (user_id) REFERENCES users(id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    ");
+
+    $pdo->exec("
+        CREATE TABLE IF NOT EXISTS stock_pointer_inventory (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            stock_pointer_id INT NOT NULL,
+            product_id INT NOT NULL,
+            qty INT NOT NULL DEFAULT 0,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            UNIQUE KEY uniq_stock_pointer_product (stock_pointer_id, product_id),
+            FOREIGN KEY (stock_pointer_id) REFERENCES users(id),
+            FOREIGN KEY (product_id) REFERENCES products(id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    ");
+
+    $pdo->exec("
+        CREATE TABLE IF NOT EXISTS stock_pointer_transfers (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            stock_pointer_id INT NOT NULL,
+            product_id INT NOT NULL,
+            qty INT NOT NULL,
+            created_by INT NOT NULL,
+            note VARCHAR(255) DEFAULT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (stock_pointer_id) REFERENCES users(id),
+            FOREIGN KEY (product_id) REFERENCES products(id),
+            FOREIGN KEY (created_by) REFERENCES users(id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    ");
+
+    $pdo->exec("
+        CREATE TABLE IF NOT EXISTS pos_sales (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            stock_pointer_id INT NOT NULL,
+            buyer_user_id INT DEFAULT NULL,
+            customer_type ENUM('customer','distributor') NOT NULL DEFAULT 'customer',
+            buyer_name VARCHAR(120) NOT NULL,
+            buyer_phone VARCHAR(30) DEFAULT NULL,
+            subtotal DECIMAL(10,2) NOT NULL DEFAULT 0,
+            tax_total DECIMAL(10,2) NOT NULL DEFAULT 0,
+            grand_total DECIMAL(10,2) NOT NULL DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (stock_pointer_id) REFERENCES users(id),
+            FOREIGN KEY (buyer_user_id) REFERENCES users(id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    ");
+
+    $pdo->exec("
+        CREATE TABLE IF NOT EXISTS pos_sale_items (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            sale_id INT NOT NULL,
+            product_id INT NOT NULL,
+            product_name VARCHAR(180) NOT NULL,
+            qty INT NOT NULL,
+            unit_price DECIMAL(10,2) NOT NULL,
+            tax_amount DECIMAL(10,2) NOT NULL,
+            product_type VARCHAR(40) NOT NULL,
+            FOREIGN KEY (sale_id) REFERENCES pos_sales(id),
+            FOREIGN KEY (product_id) REFERENCES products(id)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     ");
 
