@@ -1,7 +1,7 @@
 <?php
 $super = require_super_admin();
 $module = $_GET['module'] ?? 'overview';
-$allowedModules = ['overview', 'users', 'roles', 'wallets', 'stock_pointers', 'system'];
+$allowedModules = ['overview', 'users', 'roles', 'wallets', 'stock_pointers', 'stock_reports', 'system'];
 if (!in_array($module, $allowedModules, true)) {
     $module = 'overview';
 }
@@ -20,6 +20,8 @@ $admins = (int)db()->query("SELECT COUNT(*) FROM users WHERE role IN ('admin','s
 $distributors = (int)db()->query("SELECT COUNT(*) FROM users WHERE role = 'distributor'")->fetchColumn();
 $stockPointers = stock_pointer_users();
 $stockPointerTransfers = stock_pointer_transfer_history(0, 60);
+$stockPointerSales = stock_pointer_sales_report(0, 100);
+$stockPointerSummary = stock_pointer_report_summary();
 $activeProducts = db()->query("SELECT * FROM products WHERE is_active = 1 ORDER BY category, name")->fetchAll();
 ?>
 <div class="admin-shell">
@@ -30,6 +32,7 @@ $activeProducts = db()->query("SELECT * FROM products WHERE is_active = 1 ORDER 
         <a class="<?= $module === 'roles' ? 'active' : '' ?>" href="index.php?page=super_admin&module=roles">Roles</a>
         <a class="<?= $module === 'wallets' ? 'active' : '' ?>" href="index.php?page=super_admin&module=wallets">Wallets</a>
         <a class="<?= $module === 'stock_pointers' ? 'active' : '' ?>" href="index.php?page=super_admin&module=stock_pointers">Stock Pointers</a>
+        <a class="<?= $module === 'stock_reports' ? 'active' : '' ?>" href="index.php?page=super_admin&module=stock_reports">Stock Reports</a>
         <a class="<?= $module === 'system' ? 'active' : '' ?>" href="index.php?page=super_admin&module=system">System</a>
         <a href="index.php?page=admin">Admin Panel</a>
         <a href="index.php">View Store</a>
@@ -39,7 +42,7 @@ $activeProducts = db()->query("SELECT * FROM products WHERE is_active = 1 ORDER 
         <div class="admin-topbar">
             <div>
                 <span>owner access</span>
-                <h1><?= e(ucwords($module)) ?></h1>
+                <h1><?= e(ucwords(str_replace('_', ' ', $module))) ?></h1>
             </div>
             <a class="primary-cta" href="index.php?page=super_admin&module=users">Create User</a>
         </div>
@@ -131,11 +134,60 @@ $activeProducts = db()->query("SELECT * FROM products WHERE is_active = 1 ORDER 
             <section class="panel">
                 <h2 class="section-title">Transfer History</h2><br>
                 <table class="table">
-                    <tr><th>Date</th><th>Stock Pointer</th><th>Product</th><th>Qty</th><th>By</th><th>Note</th></tr>
+                    <tr><th>Date</th><th>Stock Pointer</th><th>Product</th><th>Qty</th><th>By</th><th>Bill</th><th>Note</th></tr>
                     <?php foreach ($stockPointerTransfers as $row): ?>
-                        <tr><td><?= e($row['created_at']) ?></td><td><?= e($row['stock_pointer_name']) ?></td><td><?= e($row['product_name']) ?></td><td><?= (int)$row['qty'] ?></td><td><?= e($row['admin_name']) ?></td><td><?= e($row['note'] ?: '-') ?></td></tr>
+                        <tr><td><?= e($row['created_at']) ?></td><td><?= e($row['stock_pointer_name']) ?></td><td><?= e($row['product_name']) ?></td><td><?= (int)$row['qty'] ?></td><td><?= e($row['admin_name']) ?></td><td><a class="see-all-btn" href="index.php?page=stock_transfer_bill&id=<?= (int)$row['id'] ?>" target="_blank">View</a> <a class="see-all-btn" href="index.php?action=download_stock_transfer_bill&id=<?= (int)$row['id'] ?>">Download</a></td><td><?= e($row['note'] ?: '-') ?></td></tr>
                     <?php endforeach; ?>
-                    <?php if (!$stockPointerTransfers): ?><tr><td colspan="6">No stock allocated yet.</td></tr><?php endif; ?>
+                    <?php if (!$stockPointerTransfers): ?><tr><td colspan="7">No stock allocated yet.</td></tr><?php endif; ?>
+                </table>
+            </section>
+        <?php endif; ?>
+
+        <?php if ($module === 'stock_reports'): ?>
+            <div class="grid-3">
+                <div class="stats">Imported Units<b><?= $stockPointerSummary['imported_units'] ?></b></div>
+                <div class="stats">Available Units<b><?= $stockPointerSummary['available_units'] ?></b></div>
+                <div class="stats">POS Revenue<b><?= money($stockPointerSummary['revenue']) ?></b></div>
+            </div><br>
+            <div class="grid-3">
+                <div class="stats">Stock Transfers<b><?= $stockPointerSummary['transfer_count'] ?></b></div>
+                <div class="stats">POS Sales<b><?= $stockPointerSummary['sales_count'] ?></b></div>
+                <div class="stats">GST in POS<b><?= money($stockPointerSummary['tax']) ?></b></div>
+            </div><br>
+            <section class="panel">
+                <h2 class="section-title">Stock Pointer POS Sales</h2><br>
+                <table class="table">
+                    <tr><th>Invoice</th><th>Stock Pointer</th><th>Buyer</th><th>Type</th><th>Tax</th><th>Total</th><th>Date</th><th>Action</th></tr>
+                    <?php foreach ($stockPointerSales as $sale): ?>
+                        <tr>
+                            <td>#POS-<?= (int)$sale['id'] ?></td>
+                            <td><?= e($sale['stock_pointer_name']) ?><br><span class="small"><?= e($sale['stock_pointer_phone'] ?: $sale['stock_pointer_email']) ?></span></td>
+                            <td><?= e($sale['buyer_name']) ?><br><span class="small"><?= e($sale['buyer_phone'] ?: '-') ?></span></td>
+                            <td><?= e($sale['customer_type']) ?></td>
+                            <td><?= money($sale['tax_total']) ?></td>
+                            <td><?= money($sale['grand_total']) ?></td>
+                            <td><?= e($sale['created_at']) ?></td>
+                            <td><a class="see-all-btn" href="index.php?page=pos_invoice&id=<?= (int)$sale['id'] ?>" target="_blank">View</a> <a class="see-all-btn" href="index.php?action=download_pos_invoice&id=<?= (int)$sale['id'] ?>">Download</a></td>
+                        </tr>
+                    <?php endforeach; ?>
+                    <?php if (!$stockPointerSales): ?><tr><td colspan="8">No POS sales yet.</td></tr><?php endif; ?>
+                </table>
+            </section><br>
+            <section class="panel">
+                <h2 class="section-title">Stock Transfer Bills</h2><br>
+                <table class="table">
+                    <tr><th>Bill</th><th>Stock Pointer</th><th>Product</th><th>Qty</th><th>Date</th><th>Action</th></tr>
+                    <?php foreach ($stockPointerTransfers as $row): ?>
+                        <tr>
+                            <td>#STK-<?= (int)$row['id'] ?></td>
+                            <td><?= e($row['stock_pointer_name']) ?></td>
+                            <td><?= e($row['product_name']) ?></td>
+                            <td><?= (int)$row['qty'] ?></td>
+                            <td><?= e($row['created_at']) ?></td>
+                            <td><a class="see-all-btn" href="index.php?page=stock_transfer_bill&id=<?= (int)$row['id'] ?>" target="_blank">View</a> <a class="see-all-btn" href="index.php?action=download_stock_transfer_bill&id=<?= (int)$row['id'] ?>">Download</a></td>
+                        </tr>
+                    <?php endforeach; ?>
+                    <?php if (!$stockPointerTransfers): ?><tr><td colspan="6">No stock transfer bills yet.</td></tr><?php endif; ?>
                 </table>
             </section>
         <?php endif; ?>

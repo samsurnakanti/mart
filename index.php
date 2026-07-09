@@ -236,6 +236,22 @@ try {
         echo render_invoice_document($invoice);
         exit;
     }
+
+    if ($action === 'download_pos_invoice') {
+        $invoice = pos_sale_for_invoice((int)($_GET['id'] ?? 0));
+        header('Content-Type: text/html; charset=UTF-8');
+        header('Content-Disposition: attachment; filename="pos-invoice-' . (int)$invoice['id'] . '.html"');
+        echo render_pos_invoice_document($invoice);
+        exit;
+    }
+
+    if ($action === 'download_stock_transfer_bill') {
+        $bill = stock_transfer_for_invoice((int)($_GET['id'] ?? 0));
+        header('Content-Type: text/html; charset=UTF-8');
+        header('Content-Disposition: attachment; filename="stock-transfer-' . (int)$bill['id'] . '.html"');
+        echo render_stock_transfer_document($bill);
+        exit;
+    }
 } catch (Throwable $ex) {
     if ($pdo->inTransaction()) {
         $pdo->rollBack();
@@ -245,13 +261,25 @@ try {
 }
 
 $page = $_GET['page'] ?? 'home';
-$allowed = ['home', 'products', 'product', 'login', 'signup', 'forgot_password', 'cart', 'checkout', 'profile', 'invoice', 'admin', 'super_admin', 'distributor', 'stock_pointer'];
+$allowed = ['home', 'products', 'product', 'login', 'signup', 'forgot_password', 'cart', 'checkout', 'profile', 'invoice', 'pos_invoice', 'stock_transfer_bill', 'admin', 'super_admin', 'distributor', 'stock_pointer'];
 if (!in_array($page, $allowed, true)) {
     $page = 'home';
 }
 
 if ($page === 'invoice') {
     include __DIR__ . '/pages/invoice.php';
+}
+
+if ($page === 'pos_invoice') {
+    $invoice = pos_sale_for_invoice((int)($_GET['id'] ?? 0));
+    echo render_pos_invoice_document($invoice);
+    exit;
+}
+
+if ($page === 'stock_transfer_bill') {
+    $bill = stock_transfer_for_invoice((int)($_GET['id'] ?? 0));
+    echo render_stock_transfer_document($bill);
+    exit;
 }
 
 include __DIR__ . '/includes/header.php';

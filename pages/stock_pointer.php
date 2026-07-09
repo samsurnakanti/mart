@@ -1,13 +1,15 @@
 <?php
 $user = require_stock_pointer();
 $section = $_GET['section'] ?? 'dashboard';
-$allowedSections = ['dashboard', 'inventory', 'pos', 'sales'];
+$allowedSections = ['dashboard', 'inventory', 'pos', 'sales', 'reports', 'invoices'];
 if (!in_array($section, $allowedSections, true)) {
     $section = 'dashboard';
 }
 
 $inventory = stock_pointer_inventory((int)$user['id']);
 $sales = stock_pointer_sales((int)$user['id'], 60);
+$salesReport = stock_pointer_sales_report((int)$user['id'], 100);
+$reportSummary = stock_pointer_report_summary((int)$user['id']);
 $transfers = stock_pointer_transfer_history((int)$user['id'], 30);
 $customerBuyers = pos_buyers('customer');
 $distributorBuyers = pos_buyers('distributor');
@@ -27,6 +29,8 @@ $sectionTitles = [
     'inventory' => 'Inventory',
     'pos' => 'POS',
     'sales' => 'Sales',
+    'reports' => 'Reports',
+    'invoices' => 'Invoices',
 ];
 ?>
 <div class="admin-shell stock-pointer-shell">
@@ -36,6 +40,8 @@ $sectionTitles = [
         <a class="<?= $section === 'inventory' ? 'active' : '' ?>" href="index.php?page=stock_pointer&section=inventory">Imported Stock</a>
         <a class="<?= $section === 'pos' ? 'active' : '' ?>" href="index.php?page=stock_pointer&section=pos">Sell POS</a>
         <a class="<?= $section === 'sales' ? 'active' : '' ?>" href="index.php?page=stock_pointer&section=sales">Sales History</a>
+        <a class="<?= $section === 'reports' ? 'active' : '' ?>" href="index.php?page=stock_pointer&section=reports">Reports</a>
+        <a class="<?= $section === 'invoices' ? 'active' : '' ?>" href="index.php?page=stock_pointer&section=invoices">Invoices</a>
         <a href="index.php?action=logout">Logout</a>
     </aside>
 
@@ -57,11 +63,11 @@ $sectionTitles = [
             <section class="panel">
                 <h2 class="section-title">Recent Imported Stock</h2><br>
                 <table class="table">
-                    <tr><th>Date</th><th>Product</th><th>Qty</th><th>Note</th></tr>
+                    <tr><th>Date</th><th>Product</th><th>Qty</th><th>Bill</th><th>Note</th></tr>
                     <?php foreach ($transfers as $row): ?>
-                        <tr><td><?= e($row['created_at']) ?></td><td><?= e($row['product_name']) ?></td><td><?= (int)$row['qty'] ?></td><td><?= e($row['note'] ?: '-') ?></td></tr>
+                        <tr><td><?= e($row['created_at']) ?></td><td><?= e($row['product_name']) ?></td><td><?= (int)$row['qty'] ?></td><td><a class="see-all-btn" href="index.php?page=stock_transfer_bill&id=<?= (int)$row['id'] ?>" target="_blank">View</a></td><td><?= e($row['note'] ?: '-') ?></td></tr>
                     <?php endforeach; ?>
-                    <?php if (!$transfers): ?><tr><td colspan="4">No stock imported yet.</td></tr><?php endif; ?>
+                    <?php if (!$transfers): ?><tr><td colspan="5">No stock imported yet.</td></tr><?php endif; ?>
                 </table>
             </section>
         <?php endif; ?>
@@ -136,7 +142,7 @@ $sectionTitles = [
             <section class="panel">
                 <h2 class="section-title">POS Sales History</h2><br>
                 <table class="table">
-                    <tr><th>Sale</th><th>Buyer</th><th>Products</th><th>Total</th><th>Date</th></tr>
+                    <tr><th>Sale</th><th>Buyer</th><th>Products</th><th>Total</th><th>Invoice</th><th>Date</th></tr>
                     <?php foreach ($sales as $sale): ?>
                         <tr>
                             <td>#<?= (int)$sale['id'] ?><br><span class="small"><?= e($sale['customer_type']) ?></span></td>
@@ -152,10 +158,94 @@ $sectionTitles = [
                                 </details>
                             </td>
                             <td><?= money($sale['grand_total']) ?></td>
+                            <td><a class="see-all-btn" href="index.php?page=pos_invoice&id=<?= (int)$sale['id'] ?>" target="_blank">View</a> <a class="see-all-btn" href="index.php?action=download_pos_invoice&id=<?= (int)$sale['id'] ?>">Download</a></td>
                             <td><?= e($sale['created_at']) ?></td>
                         </tr>
                     <?php endforeach; ?>
-                    <?php if (!$sales): ?><tr><td colspan="5">No POS sales yet.</td></tr><?php endif; ?>
+                    <?php if (!$sales): ?><tr><td colspan="6">No POS sales yet.</td></tr><?php endif; ?>
+                </table>
+            </section>
+        <?php endif; ?>
+
+        <?php if ($section === 'reports'): ?>
+            <div class="grid-3">
+                <div class="stats">Imported Units<b><?= $reportSummary['imported_units'] ?></b></div>
+                <div class="stats">Available Units<b><?= $reportSummary['available_units'] ?></b></div>
+                <div class="stats">POS Revenue<b><?= money($reportSummary['revenue']) ?></b></div>
+            </div><br>
+            <div class="grid-3">
+                <div class="stats">Stock Transfers<b><?= $reportSummary['transfer_count'] ?></b></div>
+                <div class="stats">POS Sales<b><?= $reportSummary['sales_count'] ?></b></div>
+                <div class="stats">GST in POS<b><?= money($reportSummary['tax']) ?></b></div>
+            </div><br>
+            <section class="panel">
+                <h2 class="section-title">Sales Report</h2><br>
+                <table class="table">
+                    <tr><th>Invoice</th><th>Buyer</th><th>Type</th><th>Tax</th><th>Total</th><th>Date</th><th>Action</th></tr>
+                    <?php foreach ($salesReport as $sale): ?>
+                        <tr>
+                            <td>#POS-<?= (int)$sale['id'] ?></td>
+                            <td><?= e($sale['buyer_name']) ?><br><span class="small"><?= e($sale['buyer_phone'] ?: '-') ?></span></td>
+                            <td><?= e($sale['customer_type']) ?></td>
+                            <td><?= money($sale['tax_total']) ?></td>
+                            <td><?= money($sale['grand_total']) ?></td>
+                            <td><?= e($sale['created_at']) ?></td>
+                            <td><a class="see-all-btn" href="index.php?page=pos_invoice&id=<?= (int)$sale['id'] ?>" target="_blank">View</a> <a class="see-all-btn" href="index.php?action=download_pos_invoice&id=<?= (int)$sale['id'] ?>">Download</a></td>
+                        </tr>
+                    <?php endforeach; ?>
+                    <?php if (!$salesReport): ?><tr><td colspan="7">No sales report yet.</td></tr><?php endif; ?>
+                </table>
+            </section><br>
+            <section class="panel">
+                <h2 class="section-title">Imported Stock Report</h2><br>
+                <table class="table">
+                    <tr><th>Bill</th><th>Product</th><th>Qty</th><th>By</th><th>Date</th><th>Action</th></tr>
+                    <?php foreach ($transfers as $row): ?>
+                        <tr>
+                            <td>#STK-<?= (int)$row['id'] ?></td>
+                            <td><?= e($row['product_name']) ?></td>
+                            <td><?= (int)$row['qty'] ?></td>
+                            <td><?= e($row['admin_name']) ?></td>
+                            <td><?= e($row['created_at']) ?></td>
+                            <td><a class="see-all-btn" href="index.php?page=stock_transfer_bill&id=<?= (int)$row['id'] ?>" target="_blank">View</a> <a class="see-all-btn" href="index.php?action=download_stock_transfer_bill&id=<?= (int)$row['id'] ?>">Download</a></td>
+                        </tr>
+                    <?php endforeach; ?>
+                    <?php if (!$transfers): ?><tr><td colspan="6">No imported stock report yet.</td></tr><?php endif; ?>
+                </table>
+            </section>
+        <?php endif; ?>
+
+        <?php if ($section === 'invoices'): ?>
+            <section class="panel">
+                <h2 class="section-title">POS Invoices</h2><br>
+                <table class="table">
+                    <tr><th>Invoice</th><th>Buyer</th><th>Total</th><th>Date</th><th>Action</th></tr>
+                    <?php foreach ($salesReport as $sale): ?>
+                        <tr>
+                            <td>#POS-<?= (int)$sale['id'] ?></td>
+                            <td><?= e($sale['buyer_name']) ?><br><span class="small"><?= e($sale['buyer_phone'] ?: '-') ?></span></td>
+                            <td><?= money($sale['grand_total']) ?></td>
+                            <td><?= e($sale['created_at']) ?></td>
+                            <td><a class="see-all-btn" href="index.php?page=pos_invoice&id=<?= (int)$sale['id'] ?>" target="_blank">View</a> <a class="see-all-btn" href="index.php?action=download_pos_invoice&id=<?= (int)$sale['id'] ?>">Download</a></td>
+                        </tr>
+                    <?php endforeach; ?>
+                    <?php if (!$salesReport): ?><tr><td colspan="5">No POS invoices yet.</td></tr><?php endif; ?>
+                </table>
+            </section><br>
+            <section class="panel">
+                <h2 class="section-title">Stock Transfer Bills</h2><br>
+                <table class="table">
+                    <tr><th>Bill</th><th>Product</th><th>Qty</th><th>Date</th><th>Action</th></tr>
+                    <?php foreach ($transfers as $row): ?>
+                        <tr>
+                            <td>#STK-<?= (int)$row['id'] ?></td>
+                            <td><?= e($row['product_name']) ?></td>
+                            <td><?= (int)$row['qty'] ?></td>
+                            <td><?= e($row['created_at']) ?></td>
+                            <td><a class="see-all-btn" href="index.php?page=stock_transfer_bill&id=<?= (int)$row['id'] ?>" target="_blank">View</a> <a class="see-all-btn" href="index.php?action=download_stock_transfer_bill&id=<?= (int)$row['id'] ?>">Download</a></td>
+                        </tr>
+                    <?php endforeach; ?>
+                    <?php if (!$transfers): ?><tr><td colspan="5">No stock transfer bills yet.</td></tr><?php endif; ?>
                 </table>
             </section>
         <?php endif; ?>

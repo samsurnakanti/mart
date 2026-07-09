@@ -636,6 +636,241 @@ function stock_pointer_sales(int $stockPointerId, int $limit = 50): array
     return $stmt->fetchAll();
 }
 
+function stock_pointer_sales_report(int $stockPointerId = 0, int $limit = 100): array
+{
+    $sql = '
+        SELECT ps.*, sp.name AS stock_pointer_name, sp.email AS stock_pointer_email, sp.phone AS stock_pointer_phone
+        FROM pos_sales ps
+        JOIN users sp ON sp.id = ps.stock_pointer_id
+    ';
+    $params = [];
+    if ($stockPointerId > 0) {
+        $sql .= ' WHERE ps.stock_pointer_id = ?';
+        $params[] = $stockPointerId;
+    }
+    $sql .= ' ORDER BY ps.id DESC LIMIT ' . max(1, $limit);
+    $stmt = db()->prepare($sql);
+    $stmt->execute($params);
+    return $stmt->fetchAll();
+}
+
+function stock_pointer_report_summary(int $stockPointerId = 0): array
+{
+    $whereSales = $stockPointerId > 0 ? ' WHERE stock_pointer_id = ?' : '';
+    $whereTransfers = $stockPointerId > 0 ? ' WHERE stock_pointer_id = ?' : '';
+    $salesStmt = db()->prepare("
+        SELECT COUNT(*) AS sales_count, COALESCE(SUM(grand_total),0) AS revenue, COALESCE(SUM(tax_total),0) AS tax
+        FROM pos_sales
+        $whereSales
+    ");
+    $salesStmt->execute($stockPointerId > 0 ? [$stockPointerId] : []);
+    $sales = $salesStmt->fetch() ?: [];
+
+    $transferStmt = db()->prepare("
+        SELECT COUNT(*) AS transfer_count, COALESCE(SUM(qty),0) AS imported_units
+        FROM stock_pointer_transfers
+        $whereTransfers
+    ");
+    $transferStmt->execute($stockPointerId > 0 ? [$stockPointerId] : []);
+    $transfers = $transferStmt->fetch() ?: [];
+
+    $stockStmt = db()->prepare('
+        SELECT COALESCE(SUM(qty),0)
+        FROM stock_pointer_inventory
+        ' . ($stockPointerId > 0 ? 'WHERE stock_pointer_id = ?' : '')
+    );
+    $stockStmt->execute($stockPointerId > 0 ? [$stockPointerId] : []);
+
+    return [
+        'sales_count' => (int)($sales['sales_count'] ?? 0),
+        'revenue' => (float)($sales['revenue'] ?? 0),
+        'tax' => (float)($sales['tax'] ?? 0),
+        'transfer_count' => (int)($transfers['transfer_count'] ?? 0),
+        'imported_units' => (int)($transfers['imported_units'] ?? 0),
+        'available_units' => (int)$stockStmt->fetchColumn(),
+    ];
+}
+
+function pos_sale_for_invoice(int $saleId): array
+{
+    $user = require_login();
+    $stmt = db()->prepare('
+        SELECT ps.*, sp.name AS stock_pointer_name, sp.email AS stock_pointer_email, sp.phone AS stock_pointer_phone
+        FROM pos_sales ps
+        JOIN users sp ON sp.id = ps.stock_pointer_id
+        WHERE ps.id = ?
+    ');
+    $stmt->execute([$saleId]);
+    $sale = $stmt->fetch();
+    if (!$sale) {
+        throw new RuntimeException('POS invoice not found.');
+    }
+    if ((int)$sale['stock_pointer_id'] !== (int)$user['id'] && !in_array($user['role'], ['admin', 'super_admin'], true)) {
+        throw new RuntimeException('POS invoice access denied.');
+    }
+    $items = db()->prepare('SELECT * FROM pos_sale_items WHERE sale_id = ? ORDER BY id');
+    $items->execute([$saleId]);
+    $sale['items'] = $items->fetchAll();
+    return $sale;
+}
+
+function stock_transfer_for_invoice(int $transferId): array
+{
+    $user = require_login();
+    $stmt = db()->prepare('
+        SELECT spt.*, sp.name AS stock_pointer_name, sp.email AS stock_pointer_email, sp.phone AS stock_pointer_phone,
+               p.name AS product_name, p.category, p.selling_price, p.tax_percent, u.name AS admin_name
+        FROM stock_pointer_transfers spt
+        JOIN users sp ON sp.id = spt.stock_pointer_id
+        JOIN products p ON p.id = spt.product_id
+        JOIN users u ON u.id = spt.created_by
+        WHERE spt.id = ?
+    ');
+    $stmt->execute([$transferId]);
+    $transfer = $stmt->fetch();
+    if (!$transfer) {
+        throw new RuntimeException('Stock transfer bill not found.');
+    }
+    if ((int)$transfer['stock_pointer_id'] !== (int)$user['id'] && !in_array($user['role'], ['admin', 'super_admin'], true)) {
+        throw new RuntimeException('Stock transfer bill access denied.');
+    }
+    $lineTotal = (float)$transfer['selling_price'] * (int)$transfer['qty'];
+    $taxRate = (float)$transfer['tax_percent'];
+    $transfer['line_tax'] = $taxRate > 0 ? $lineTotal * ($taxRate / (100 + $taxRate)) : 0.0;
+    $transfer['line_subtotal'] = $lineTotal - (float)$transfer['line_tax'];
+    $transfer['line_total'] = $lineTotal;
+    return $transfer;
+}
+
+function render_pos_invoice_document(array $sale): string
+{
+    ob_start();
+    ?>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>POS Invoice #<?= (int)$sale['id'] ?></title>
+<style>
+body{font-family:Arial,sans-serif;color:#17202a;margin:0;background:#f6f7f8}
+.invoice{max-width:820px;margin:28px auto;background:#fff;padding:28px;border-radius:16px}
+.head{display:flex;justify-content:space-between;gap:20px;border-bottom:1px solid #ddd;padding-bottom:18px}
+h1{margin:0 0 5px}.muted{color:#667085}.meta{text-align:right}
+table{width:100%;border-collapse:collapse;margin-top:22px}th,td{padding:12px;border-bottom:1px solid #eee;text-align:left}th{text-transform:uppercase;font-size:12px;color:#667085}
+.totals{margin-left:auto;margin-top:18px;width:280px}.totals div{display:flex;justify-content:space-between;padding:7px 0}.grand{font-size:20px;font-weight:bold;border-top:1px solid #ddd;margin-top:8px;padding-top:12px!important}
+.actions{max-width:820px;margin:0 auto 20px;text-align:right}.actions button{padding:10px 14px;border:0;border-radius:10px;background:#17202a;color:#fff;font-weight:bold}
+@media print{body{background:#fff}.actions{display:none}.invoice{box-shadow:none;margin:0;max-width:none;border-radius:0}}
+</style>
+</head>
+<body>
+<div class="actions"><button onclick="window.print()">Print Invoice</button></div>
+<main class="invoice">
+    <div class="head">
+        <div>
+            <h1>VMCmarts POS</h1>
+            <div class="muted">Stock Pointer Invoice</div>
+        </div>
+        <div class="meta">
+            <b>Invoice #POS-<?= (int)$sale['id'] ?></b><br>
+            <span class="muted"><?= e($sale['created_at']) ?></span>
+        </div>
+    </div>
+    <p>
+        <b>Sold By:</b> <?= e($sale['stock_pointer_name']) ?><br>
+        <?= e($sale['stock_pointer_phone'] ?: $sale['stock_pointer_email']) ?><br><br>
+        <b>Bill To:</b> <?= e($sale['buyer_name']) ?><br>
+        <?= e($sale['buyer_phone'] ?: '-') ?><br>
+        <?= e(ucwords($sale['customer_type'])) ?>
+    </p>
+    <table>
+        <tr><th>Item</th><th>Qty</th><th>GST incl. price</th><th>GST</th><th>Total</th></tr>
+        <?php foreach ($sale['items'] as $item): ?>
+            <?php $lineTotal = (float)$item['unit_price'] * (int)$item['qty']; ?>
+            <tr>
+                <td><?= e($item['product_name']) ?></td>
+                <td><?= (int)$item['qty'] ?></td>
+                <td><?= money($item['unit_price']) ?></td>
+                <td><?= money($item['tax_amount']) ?></td>
+                <td><?= money($lineTotal) ?></td>
+            </tr>
+        <?php endforeach; ?>
+    </table>
+    <div class="totals">
+        <div><span>Taxable value</span><b><?= money($sale['subtotal']) ?></b></div>
+        <div><span>GST included</span><b><?= money($sale['tax_total']) ?></b></div>
+        <div class="grand"><span>Grand total</span><b><?= money($sale['grand_total']) ?></b></div>
+    </div>
+</main>
+</body>
+</html>
+    <?php
+    return (string)ob_get_clean();
+}
+
+function render_stock_transfer_document(array $transfer): string
+{
+    ob_start();
+    ?>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Stock Bill #<?= (int)$transfer['id'] ?></title>
+<style>
+body{font-family:Arial,sans-serif;color:#17202a;margin:0;background:#f6f7f8}
+.invoice{max-width:820px;margin:28px auto;background:#fff;padding:28px;border-radius:16px}
+.head{display:flex;justify-content:space-between;gap:20px;border-bottom:1px solid #ddd;padding-bottom:18px}
+h1{margin:0 0 5px}.muted{color:#667085}.meta{text-align:right}
+table{width:100%;border-collapse:collapse;margin-top:22px}th,td{padding:12px;border-bottom:1px solid #eee;text-align:left}th{text-transform:uppercase;font-size:12px;color:#667085}
+.totals{margin-left:auto;margin-top:18px;width:280px}.totals div{display:flex;justify-content:space-between;padding:7px 0}.grand{font-size:20px;font-weight:bold;border-top:1px solid #ddd;margin-top:8px;padding-top:12px!important}
+.actions{max-width:820px;margin:0 auto 20px;text-align:right}.actions button{padding:10px 14px;border:0;border-radius:10px;background:#17202a;color:#fff;font-weight:bold}
+@media print{body{background:#fff}.actions{display:none}.invoice{box-shadow:none;margin:0;max-width:none;border-radius:0}}
+</style>
+</head>
+<body>
+<div class="actions"><button onclick="window.print()">Print Bill</button></div>
+<main class="invoice">
+    <div class="head">
+        <div>
+            <h1>VMCmarts</h1>
+            <div class="muted">Stock Transfer Bill</div>
+        </div>
+        <div class="meta">
+            <b>Bill #STK-<?= (int)$transfer['id'] ?></b><br>
+            <span class="muted"><?= e($transfer['created_at']) ?></span>
+        </div>
+    </div>
+    <p>
+        <b>Issued By:</b> <?= e($transfer['admin_name']) ?><br>
+        <b>Issued To:</b> <?= e($transfer['stock_pointer_name']) ?><br>
+        <?= e($transfer['stock_pointer_phone'] ?: $transfer['stock_pointer_email']) ?><br>
+        <?php if (!empty($transfer['note'])): ?><b>Note:</b> <?= e($transfer['note']) ?><?php endif; ?>
+    </p>
+    <table>
+        <tr><th>Item</th><th>Category</th><th>Qty</th><th>GST incl. price</th><th>GST</th><th>Total</th></tr>
+        <tr>
+            <td><?= e($transfer['product_name']) ?></td>
+            <td><?= e($transfer['category']) ?></td>
+            <td><?= (int)$transfer['qty'] ?></td>
+            <td><?= money($transfer['selling_price']) ?></td>
+            <td><?= money($transfer['line_tax']) ?></td>
+            <td><?= money($transfer['line_total']) ?></td>
+        </tr>
+    </table>
+    <div class="totals">
+        <div><span>Taxable value</span><b><?= money($transfer['line_subtotal']) ?></b></div>
+        <div><span>GST included</span><b><?= money($transfer['line_tax']) ?></b></div>
+        <div class="grand"><span>Stock value</span><b><?= money($transfer['line_total']) ?></b></div>
+    </div>
+</main>
+</body>
+</html>
+    <?php
+    return (string)ob_get_clean();
+}
+
 function submit_stock_pointer_pos_sale(array $data): int
 {
     $stockPointer = require_stock_pointer();
