@@ -188,6 +188,12 @@ try {
             redirect_to($user && $user['role'] === 'super_admin' ? 'super_admin&module=system' : 'admin&module=settings');
         }
 
+        if ($action === 'update_super_admin_whatsapp') {
+            update_super_admin_whatsapp($_POST);
+            flash('ok', 'Super admin WhatsApp number updated.');
+            redirect_to('super_admin&module=system');
+        }
+
         if ($action === 'request_data_reset_otp') {
             request_super_admin_reset_otp();
             redirect_to('super_admin&module=system&reset_verify=1');

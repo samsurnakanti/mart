@@ -212,6 +212,16 @@ $activeProducts = db()->query("SELECT * FROM products WHERE is_active = 1 ORDER 
                 </form>
             </section>
             <br>
+            <section class="panel">
+                <h2 class="section-title">Super Admin WhatsApp Number</h2>
+                <p class="section-kicker">Reset confirmation OTP is sent to this number.</p><br>
+                <form method="post" class="form-grid">
+                    <input type="hidden" name="action" value="update_super_admin_whatsapp">
+                    <div class="field full"><label>WhatsApp Mobile Number</label><input name="phone" inputmode="tel" value="<?= e($super['phone']) ?>" required></div>
+                    <button class="pill-btn full">Update WhatsApp Number</button>
+                </form>
+            </section>
+            <br>
             <section class="panel danger-panel">
                 <h2 class="section-title">Production Data Reset</h2>
                 <p class="section-kicker">Super admin only. This clears products, categories, users, orders, wallets, stock pointer data, POS sales and BV records, then recreates only the default super admin/admin accounts.</p><br>

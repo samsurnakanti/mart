@@ -1421,6 +1421,15 @@ function request_super_admin_reset_otp(): void
     flash('ok', 'Reset OTP sent on WhatsApp. Enter it below to clear production data.');
 }
 
+function update_super_admin_whatsapp(array $data): void
+{
+    $user = require_super_admin();
+    $phone = trim($data['phone'] ?? '');
+    normalize_whatsapp_phone($phone);
+    db()->prepare('UPDATE users SET phone = ? WHERE id = ? AND role = ?')
+        ->execute([$phone, (int)$user['id'], 'super_admin']);
+}
+
 function reset_production_data_with_otp(array $data): void
 {
     $user = require_super_admin();
