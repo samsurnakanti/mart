@@ -1306,6 +1306,17 @@ code { background: #eef2f6; padding: 2px 6px; border-radius: 6px; }
 .category-card b { font-size: 15px; }
 .small { color: var(--muted); font-size: 12px; }
 .danger-link { color: #b42318; font-weight: 900; }
+.danger-panel {
+  border-color: #fecaca;
+}
+.danger-btn,
+.danger-panel .pill-btn {
+  background: #b42318;
+}
+.danger-btn:hover,
+.danger-panel .pill-btn:hover {
+  background: #8f1d14;
+}
 .stats {
   background: #fff;
   border: 1px solid var(--line);

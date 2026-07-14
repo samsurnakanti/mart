@@ -72,6 +72,13 @@ function migrate(PDO $pdo): void
     }
 
     $pdo->exec("
+        CREATE TABLE IF NOT EXISTS app_settings (
+            setting_key VARCHAR(80) PRIMARY KEY,
+            setting_value VARCHAR(255) NOT NULL
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    ");
+
+    $pdo->exec("
         CREATE TABLE IF NOT EXISTS categories (
             id INT AUTO_INCREMENT PRIMARY KEY,
             name VARCHAR(80) NOT NULL UNIQUE,
@@ -311,6 +318,10 @@ function seed_defaults(PDO $pdo): void
         $create->execute(['VMCmarts Admin', 'admin@vmcmarts.local', '9999900000', password_hash('admin123', PASSWORD_DEFAULT), 'admin', 0]);
     }
 
+    if (app_setting($pdo, 'skip_demo_seed') === '1') {
+        return;
+    }
+
     $count = (int)$pdo->query('SELECT COUNT(*) FROM products')->fetchColumn();
     if ($count > 0) {
         return;
@@ -330,6 +341,10 @@ function seed_defaults(PDO $pdo): void
 
 function seed_catalog_products(PDO $pdo): void
 {
+    if (app_setting($pdo, 'skip_demo_seed') === '1') {
+        return;
+    }
+
     $products = [
         ['Onion 1kg', 'Vegetables', 'Fresh onions selected for daily cooking.', 60, 42, 5, 2, 80, 'regular', 'assets/cat-vegetables.svg'],
         ['Tomato 1kg', 'Vegetables', 'Ripe red tomatoes for curries, salads and chutneys.', 55, 38, 5, 2, 75, 'regular', 'assets/cat-vegetables.svg'],
@@ -380,6 +395,10 @@ function seed_catalog_products(PDO $pdo): void
 
 function seed_categories(PDO $pdo): void
 {
+    if (app_setting($pdo, 'skip_demo_seed') === '1') {
+        return;
+    }
+
     $defaults = [
         ['Vegetables', 'assets/cat-vegetables.svg', 10],
         ['Grocery', 'assets/cat-grocery.svg', 20],
@@ -410,6 +429,10 @@ function seed_categories(PDO $pdo): void
 
 function seed_sliders(PDO $pdo): void
 {
+    if (app_setting($pdo, 'skip_demo_seed') === '1') {
+        return;
+    }
+
     $count = (int)$pdo->query('SELECT COUNT(*) FROM sliders')->fetchColumn();
     if ($count > 0) {
         return;
@@ -421,4 +444,22 @@ function seed_sliders(PDO $pdo): void
     ] as $row) {
         $insert->execute($row);
     }
+}
+
+function app_setting(PDO $pdo, string $key, string $default = ''): string
+{
+    $stmt = $pdo->prepare('SELECT setting_value FROM app_settings WHERE setting_key = ? LIMIT 1');
+    $stmt->execute([$key]);
+    $value = $stmt->fetchColumn();
+    return $value === false ? $default : (string)$value;
+}
+
+function set_app_setting(PDO $pdo, string $key, string $value): void
+{
+    $stmt = $pdo->prepare('
+        INSERT INTO app_settings (setting_key, setting_value)
+        VALUES (?, ?)
+        ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)
+    ');
+    $stmt->execute([$key, $value]);
 }

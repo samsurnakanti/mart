@@ -1176,6 +1176,26 @@ function set_category_active(int $id, int $active): void
     db()->prepare('UPDATE categories SET is_active = ? WHERE id = ?')->execute([$active, $id]);
 }
 
+function delete_category_permanently(int $id): void
+{
+    require_admin();
+    $stmt = db()->prepare('SELECT * FROM categories WHERE id = ?');
+    $stmt->execute([$id]);
+    $category = $stmt->fetch();
+    if (!$category) {
+        throw new RuntimeException('Category not found.');
+    }
+    $productCount = db()->prepare('SELECT COUNT(*) FROM products WHERE category = ?');
+    $productCount->execute([$category['name']]);
+    if ((int)$productCount->fetchColumn() > 0) {
+        throw new RuntimeException('This category has products. Move or delete those products first, or disable the category.');
+    }
+    if (!empty($category['image_path']) && is_file(__DIR__ . '/../' . $category['image_path'])) {
+        @unlink(__DIR__ . '/../' . $category['image_path']);
+    }
+    db()->prepare('DELETE FROM categories WHERE id = ?')->execute([$id]);
+}
+
 function save_slider(array $data, array $files): void
 {
     $id = (int)($data['id'] ?? 0);
@@ -1263,6 +1283,42 @@ function set_product_active(int $id, int $active): void
     db()->prepare('UPDATE products SET is_active = ? WHERE id = ?')->execute([$active, $id]);
 }
 
+function delete_product_permanently(int $id): void
+{
+    require_admin();
+    $stmt = db()->prepare('SELECT * FROM products WHERE id = ?');
+    $stmt->execute([$id]);
+    $product = $stmt->fetch();
+    if (!$product) {
+        throw new RuntimeException('Product not found.');
+    }
+
+    foreach ([
+        'order_items' => 'order history',
+        'pos_sale_items' => 'POS sales',
+        'stock_pointer_transfers' => 'stock transfer history',
+    ] as $table => $label) {
+        $check = db()->prepare("SELECT COUNT(*) FROM {$table} WHERE product_id = ?");
+        $check->execute([$id]);
+        if ((int)$check->fetchColumn() > 0) {
+            throw new RuntimeException('This product has ' . $label . '. Disable it instead of permanently deleting it.');
+        }
+    }
+
+    foreach (product_extra_images($id) as $img) {
+        if (!empty($img['image_path']) && is_file(__DIR__ . '/../' . $img['image_path'])) {
+            @unlink(__DIR__ . '/../' . $img['image_path']);
+        }
+    }
+    if (!empty($product['image_path']) && is_file(__DIR__ . '/../' . $product['image_path'])) {
+        @unlink(__DIR__ . '/../' . $product['image_path']);
+    }
+
+    db()->prepare('DELETE FROM stock_pointer_inventory WHERE product_id = ?')->execute([$id]);
+    db()->prepare('DELETE FROM product_images WHERE product_id = ?')->execute([$id]);
+    db()->prepare('DELETE FROM products WHERE id = ?')->execute([$id]);
+}
+
 function save_product_gallery_images(int $productId, array $files): void
 {
     if (empty($files['name']) || !is_array($files['name'])) {
@@ -1345,6 +1401,84 @@ function save_user(array $data): void
     if ($role === 'distributor') {
         assign_distributor_uid($id);
     }
+}
+
+function request_super_admin_reset_otp(): void
+{
+    $user = require_super_admin();
+    $phone = trim((string)($user['phone'] ?? ''));
+    if ($phone === '') {
+        throw new RuntimeException('Add a WhatsApp mobile number to the super admin account first.');
+    }
+
+    $otp = make_otp();
+    $_SESSION['data_reset_otp'] = [
+        'user_id' => (int)$user['id'],
+        'otp_hash' => password_hash($otp, PASSWORD_DEFAULT),
+        'expires_at' => time() + 600,
+    ];
+    send_whatsapp_otp($phone, $otp);
+    flash('ok', 'Reset OTP sent on WhatsApp. Enter it below to clear production data.');
+}
+
+function reset_production_data_with_otp(array $data): void
+{
+    $user = require_super_admin();
+    $pending = $_SESSION['data_reset_otp'] ?? null;
+    if (!$pending || (int)($pending['user_id'] ?? 0) !== (int)$user['id'] || (int)($pending['expires_at'] ?? 0) < time()) {
+        unset($_SESSION['data_reset_otp']);
+        throw new RuntimeException('Reset OTP expired. Please request a new OTP.');
+    }
+    if (!password_verify(trim($data['otp'] ?? ''), (string)$pending['otp_hash'])) {
+        throw new RuntimeException('Invalid OTP.');
+    }
+    if (trim($data['confirm_text'] ?? '') !== 'RESET DATA') {
+        throw new RuntimeException('Type RESET DATA to confirm production reset.');
+    }
+
+    reset_production_data();
+    unset($_SESSION['data_reset_otp'], $_SESSION['cart']);
+    flash('ok', 'Production data reset completed. Default super admin and admin accounts were recreated.');
+}
+
+function reset_production_data(): void
+{
+    $pdo = db();
+    $tables = [
+        'bv_transactions',
+        'user_cards',
+        'wallet_transactions',
+        'pos_sale_items',
+        'pos_sales',
+        'stock_pointer_transfers',
+        'stock_pointer_inventory',
+        'order_items',
+        'orders',
+        'product_images',
+        'products',
+        'sliders',
+        'categories',
+        'users',
+    ];
+
+    $pdo->exec('SET FOREIGN_KEY_CHECKS=0');
+    try {
+        foreach ($tables as $table) {
+            $pdo->exec('TRUNCATE TABLE `' . $table . '`');
+        }
+    } finally {
+        $pdo->exec('SET FOREIGN_KEY_CHECKS=1');
+    }
+
+    set_app_setting($pdo, 'skip_demo_seed', '1');
+    seed_defaults($pdo);
+    seed_categories($pdo);
+    seed_sliders($pdo);
+    seed_catalog_products($pdo);
+
+    $stmt = $pdo->prepare("SELECT id FROM users WHERE email = ? AND role = 'super_admin' LIMIT 1");
+    $stmt->execute(['superadmin@vmcmarts.local']);
+    $_SESSION['user_id'] = (int)$stmt->fetchColumn();
 }
 
 function generated_account_password(int $length = 10): string

@@ -162,7 +162,7 @@ $topProducts = db()->query('SELECT product_name, SUM(qty) qty, SUM(unit_price * 
                 <table class="table">
                     <tr><th>ID</th><th>Product</th><th>Type</th><th>MRP</th><th>Price</th><th>Tax</th><th>Points</th><th>BV</th><th>Stock</th><th>Action</th></tr>
                     <?php foreach ($products as $p): ?>
-                        <tr><td><?= (int)$p['id'] ?></td><td><?= e($p['name']) ?><br><span class="small"><?= e($p['category']) ?></span></td><td><?= e($p['product_type']) ?></td><td><?= money($p['mrp']) ?></td><td><?= money($p['selling_price']) ?></td><td><?= e($p['tax_percent']) ?>%</td><td><?= (int)$p['discount_points'] ?></td><td><?= (int)$p['bv_points'] ?></td><td><?= (int)$p['stock'] ?></td><td><a class="see-all-btn" href="index.php?page=admin&module=products&edit=<?= (int)$p['id'] ?>">Edit</a> <a class="danger-link" href="index.php?action=delete_product&id=<?= (int)$p['id'] ?>">Disable</a></td></tr>
+                        <tr><td><?= (int)$p['id'] ?></td><td><?= e($p['name']) ?><br><span class="small"><?= e($p['category']) ?></span></td><td><?= e($p['product_type']) ?></td><td><?= money($p['mrp']) ?></td><td><?= money($p['selling_price']) ?></td><td><?= e($p['tax_percent']) ?>%</td><td><?= (int)$p['discount_points'] ?></td><td><?= (int)$p['bv_points'] ?></td><td><?= (int)$p['stock'] ?></td><td><a class="see-all-btn" href="index.php?page=admin&module=products&edit=<?= (int)$p['id'] ?>">Edit</a> <a class="danger-link" href="index.php?action=delete_product&id=<?= (int)$p['id'] ?>">Disable</a> <a class="danger-link" href="index.php?action=delete_product_permanent&id=<?= (int)$p['id'] ?>" onclick="return confirm('Permanently delete this product? This cannot be undone.')">Delete</a></td></tr>
                     <?php endforeach; ?>
                 </table>
             </section>
@@ -198,7 +198,7 @@ $topProducts = db()->query('SELECT product_name, SUM(qty) qty, SUM(unit_price * 
                             <td><?= (int)$countStmt->fetchColumn() ?></td>
                             <td><?= (int)$cat['is_active'] ? 'Active' : 'Hidden' ?></td>
                             <td><?= (int)$cat['sort_order'] ?></td>
-                            <td><a class="see-all-btn" href="index.php?page=admin&module=categories&edit_category=<?= (int)$cat['id'] ?>">Edit</a> <a class="danger-link" href="index.php?action=delete_category&id=<?= (int)$cat['id'] ?>">Disable</a></td>
+                            <td><a class="see-all-btn" href="index.php?page=admin&module=categories&edit_category=<?= (int)$cat['id'] ?>">Edit</a> <a class="danger-link" href="index.php?action=delete_category&id=<?= (int)$cat['id'] ?>">Disable</a> <a class="danger-link" href="index.php?action=delete_category_permanent&id=<?= (int)$cat['id'] ?>" onclick="return confirm('Permanently delete this category? This cannot be undone.')">Delete</a></td>
                         </tr>
                     <?php endforeach; ?>
                 </table>

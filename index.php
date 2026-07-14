@@ -187,6 +187,16 @@ try {
             $user = current_user();
             redirect_to($user && $user['role'] === 'super_admin' ? 'super_admin&module=system' : 'admin&module=settings');
         }
+
+        if ($action === 'request_data_reset_otp') {
+            request_super_admin_reset_otp();
+            redirect_to('super_admin&module=system&reset_verify=1');
+        }
+
+        if ($action === 'reset_production_data') {
+            reset_production_data_with_otp($_POST);
+            redirect_to('super_admin&module=system');
+        }
     }
 
     if ($action === 'logout') {
@@ -208,10 +218,24 @@ try {
         redirect_to('admin');
     }
 
+    if ($action === 'delete_product_permanent') {
+        require_admin();
+        delete_product_permanently((int)($_GET['id'] ?? 0));
+        flash('ok', 'Product permanently deleted.');
+        redirect_to('admin&module=products');
+    }
+
     if ($action === 'delete_category') {
         require_admin();
         set_category_active((int)($_GET['id'] ?? 0), 0);
         flash('ok', 'Category disabled.');
+        redirect_to('admin&module=categories');
+    }
+
+    if ($action === 'delete_category_permanent') {
+        require_admin();
+        delete_category_permanently((int)($_GET['id'] ?? 0));
+        flash('ok', 'Category permanently deleted.');
         redirect_to('admin&module=categories');
     }
 

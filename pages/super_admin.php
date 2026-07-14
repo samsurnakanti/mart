@@ -211,6 +211,24 @@ $activeProducts = db()->query("SELECT * FROM products WHERE is_active = 1 ORDER 
                     <button class="pill-btn full">Update Password</button>
                 </form>
             </section>
+            <br>
+            <section class="panel danger-panel">
+                <h2 class="section-title">Production Data Reset</h2>
+                <p class="section-kicker">Super admin only. This clears products, categories, users, orders, wallets, stock pointer data, POS sales and BV records, then recreates only the default super admin/admin accounts.</p><br>
+                <form method="post" class="form-grid">
+                    <input type="hidden" name="action" value="request_data_reset_otp">
+                    <button class="pill-btn full" type="submit" onclick="return confirm('Send OTP to confirm full production data reset?')">Send Reset OTP</button>
+                </form>
+                <?php if (isset($_GET['reset_verify'])): ?>
+                    <br>
+                    <form method="post" class="form-grid">
+                        <input type="hidden" name="action" value="reset_production_data">
+                        <div class="field"><label>WhatsApp OTP</label><input name="otp" inputmode="numeric" required></div>
+                        <div class="field"><label>Type RESET DATA</label><input name="confirm_text" required></div>
+                        <button class="pill-btn full danger-btn" type="submit" onclick="return confirm('This will permanently clear production data. Continue?')">Reset Production Data</button>
+                    </form>
+                <?php endif; ?>
+            </section>
         <?php endif; ?>
     </section>
 </div>
